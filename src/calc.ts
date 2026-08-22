@@ -133,6 +133,21 @@ export function getTorontoToday(): Date {
   return new Date(`${torontoParts[0]}-${torontoParts[1]}-${torontoParts[2]}T00:00:00-04:00`);
 }
 
+/**
+ * The current Toronto wall-clock time as "HH:MM".
+ *
+ * Check-in and check-out stamp this rather than the device clock, so the time
+ * recorded lines up with the Toronto date `getTorontoToday` files it under.
+ */
+export function getTorontoNowTime(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Toronto",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date());
+}
+
 export const clampLunchMinutes = (value?: number | null) => {
   if (value == null) return DEFAULT_LUNCH_MINUTES;
   const n = Number(value);
