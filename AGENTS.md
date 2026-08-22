@@ -144,9 +144,20 @@ shifts the day. `getTorontoToday()` anchors "today" to Toronto time.
 `.check-card` sits above the Information panel and is the app's primary daily
 action. `handleCheckInOut` runs a three-state machine on **today's entry for the
 active job**: no start yet stamps `start`, a start without an end stamps `end`,
-and once both are set the button is disabled. That last state matters — without
-it a stray tap would overwrite the morning's start time. Corrections go through
-the calendar's day editor instead.
+and once both are set the stamp button disappears entirely. That last part
+matters — leaving a live button there would let a stray tap overwrite the
+morning's start time.
+
+`handleUndoCheck` is the way back out, so the finished state can stay closed. It
+steps the day back one stamp at a time: a finished day drops its `end` and is
+open again, and an open day drops its `start`, which removes the entry outright.
+The Undo button is only rendered once there is a start to undo.
+
+The card carries two state classes. `.compact` goes on as soon as the day has a
+start and collapses the card to a single row with a smaller button — the loud
+full-width treatment is only right while nothing has been logged yet. `.done`
+tints the status green. A finished day costs a 54px strip rather than a 129px
+block.
 
 Times come from `getTorontoNowTime()` in `calc.ts`, not the device clock, so the
 stamp agrees with the Toronto date `getTorontoToday()` files it under. Hours are

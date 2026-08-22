@@ -265,18 +265,45 @@ header {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+.check-actions {
+  display: flex;
+  gap: var(--s2);
+  align-items: center;
+}
 /* qualified with .btn: the base button rule is declared after this block */
 .btn.check-btn {
-  width: 100%;
-  /* the primary daily action, so give it a bigger target than a normal button */
+  flex: 1 1 auto;
+  /* nothing logged yet, so this is the loudest thing on the page */
   min-height: 56px;
   font-size: 1.05rem;
 }
-.check-btn:disabled {
-  opacity: 0.55;
-  cursor: default;
-  transform: none;
+.btn.check-undo {
+  flex: 0 0 auto;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--hairline);
+  font-weight: 600;
 }
+
+/*
+ * Once the day is under way the card stops shouting: the button shrinks to a
+ * normal control and the whole thing collapses to a single row, so a finished
+ * shift costs a strip of the screen instead of a block of it.
+ */
+.check-card.compact {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+}
+.check-card.compact .check-status { font-size: var(--fs-sm); }
+.check-card.compact .btn.check-btn {
+  min-height: 40px;
+  font-size: var(--fs-sm);
+  padding: var(--s1) var(--s3);
+}
+.check-card.done .check-status { color: var(--accent-green); }
 
 /* ------------------------------------------------------------- buttons --- */
 
@@ -872,7 +899,8 @@ header {
     align-items: center;
     justify-content: space-between;
   }
-  .btn.check-btn { width: auto; min-width: 200px; }
+  .btn.check-btn { flex: 0 0 auto; min-width: 200px; }
+  .check-card.compact .btn.check-btn { min-width: 140px; }
 
   .info-grid { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--s3); }
   .value { font-size: var(--fs-lg); }
