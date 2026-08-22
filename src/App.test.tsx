@@ -501,3 +501,93 @@ test("wide tables label every cell so they can stack into cards on a phone", () 
   expect(Array.from(detail.querySelectorAll("td")).map(td => td.getAttribute("data-label")))
     .toEqual(["Date", "Hours", "Earnings", "Income Tax", "EI", "CPP", "After Tax"]);
 });
+
+/* ---------------- one-tap check in / check out ---------------- */
+
+/** The date the app files "today" under, which is Toronto's, not the runner's. */
+const torontoToday = () => new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/Toronto", year: "numeric", month: "2-digit", day: "2-digit",
+}).format(new Date());
+
+const seedForCheckIn = (today?: Partial<{ start: string; end: string; hours: number; lunchMinutes: number }>) => {
+  localStorage.setItem("w2b_jobs", JSON.stringify([{ id: "cafe", name: "Cafe" }]));
+  localStorage.setItem("w2b_activeJob", "cafe");
+  localStorage.setItem(jobStorageKey("cafe", "hourlyRate"), "20");
+  localStorage.setItem(jobStorageKey("cafe", "startDate"), "2026-01-01");
+  localStorage.setItem(jobStorageKey("cafe", "dayHours"), JSON.stringify(
+    today ? [{ date: torontoToday(), lunchMinutes: 30, ...today }] : []
+  ));
+};
+
+const checkButton = () => document.querySelector(".check-btn") as HTMLButtonElement;
+const checkStatus = () => (document.querySelector(".check-status") as HTMLElement).textContent;
+const storedToday = () =>
+  JSON.parse(localStorage.getItem(jobStorageKey("cafe", "dayHours")) || "[]")
+    .find((d: { date: string }) => d.date === torontoToday());
+
+test("a day with no hours yet offers a check in", () => {
+  seedForCheckIn();
+  render(<App />);
+
+  expect(checkButton()).toHaveTextContent("Check In");
+  expect(checkButton()).not.toBeDisabled();
+  expect(checkStatus()).toBe("Not started");
+});
+
+test("checking in stamps a start time and offers the check out", () => {
+  seedForCheckIn();
+  render(<App />);
+
+  fireEvent.click(checkButton());
+
+  expect(storedToday().start).toMatch(/^\d{2}:\d{2}$/);
+  expect(storedToday().end).toBe("");
+  expect(checkButton()).toHaveTextContent("Check Out");
+  expect(checkStatus()).toContain("Checked in at");
+});
+
+test("checking out stamps the end time and works out the hours", () => {
+  // checked in at 09:00 with the default half hour of lunch
+  seedForCheckIn({ start: "09:00", end: "" });
+  render(<App />);
+  expect(checkButton()).toHaveTextContent("Check Out");
+
+  fireEvent.click(checkButton());
+
+  const day = storedToday();
+  expect(day.end).toMatch(/^\d{2}:\d{2}$/);
+  const [h, m] = day.end.split(":").map(Number);
+  expect(day.hours).toBeCloseTo((h * 60 + m - 30 - 9 * 60) / 60, 5);
+});
+
+test("a finished day is locked, so a stray tap cannot wipe the start time", () => {
+  seedForCheckIn({ start: "09:00", end: "17:00", hours: 7.5 });
+  render(<App />);
+
+  expect(checkButton()).toHaveTextContent("Done for today");
+  expect(checkButton()).toBeDisabled();
+  expect(checkStatus()).toBe("09:00 – 17:00 · 7.50h");
+
+  fireEvent.click(checkButton());
+
+  expect(storedToday()).toMatchObject({ start: "09:00", end: "17:00" });
+});
+
+test("the check in button tracks the active job, not the app as a whole", () => {
+  localStorage.setItem("w2b_jobs", JSON.stringify([{ id: "cafe", name: "Cafe" }, { id: "studio", name: "Studio" }]));
+  localStorage.setItem("w2b_activeJob", "cafe");
+  for (const id of ["cafe", "studio"]) {
+    localStorage.setItem(jobStorageKey(id, "hourlyRate"), "20");
+    localStorage.setItem(jobStorageKey(id, "startDate"), "2026-01-01");
+  }
+  // only the cafe shift has been started
+  localStorage.setItem(jobStorageKey("cafe", "dayHours"), JSON.stringify([{ date: torontoToday(), start: "09:00", end: "", lunchMinutes: 30 }]));
+  localStorage.setItem(jobStorageKey("studio", "dayHours"), JSON.stringify([]));
+  render(<App />);
+
+  expect(checkButton()).toHaveTextContent("Check Out");
+
+  fireEvent.click(screen.getByRole("button", { name: "Studio" }));
+
+  expect(checkButton()).toHaveTextContent("Check In");
+});

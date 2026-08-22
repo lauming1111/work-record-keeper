@@ -5,6 +5,7 @@ import {
   computeDetailedDays,
   computeJobEarnings,
   getIndexInfo,
+  getTorontoNowTime,
   getLunchMinutes,
   getPeriodKey,
   getOriginalHours,
@@ -292,5 +293,34 @@ describe('pay periods and the tax year', () => {
     expect(getPeriodKey('2026-01-01', 'biweekly', '2026-01-01')).not.toBe(getPeriodKey('2026-01-15', 'biweekly', '2026-01-01'));
     expect(getPeriodKey('2026-01-15', 'semi-monthly', START)).not.toBe(getPeriodKey('2026-01-16', 'semi-monthly', START));
     expect(getPeriodKey('2026-01-31', 'monthly', START)).toBe(getPeriodKey('2026-01-01', 'monthly', START));
+  });
+});
+
+describe('getTorontoNowTime', () => {
+  /** Freeze the clock at a fixed instant for the duration of `run`. */
+  const atInstant = (iso: string, run: () => void) => {
+    const RealDate = Date;
+    class FrozenDate extends RealDate {
+      constructor() { super(iso); }
+      static now() { return new RealDate(iso).getTime(); }
+    }
+    (global as any).Date = FrozenDate;
+    try { run(); } finally { (global as any).Date = RealDate; }
+  };
+
+  test('reports Toronto wall-clock time, not UTC', () => {
+    // 13:00 UTC in August is 09:00 in Toronto, which is on daylight time
+    atInstant('2026-08-22T13:00:00Z', () => expect(getTorontoNowTime()).toBe('09:00'));
+  });
+
+  test('follows Toronto across the daylight saving switch', () => {
+    // the same 13:00 UTC in January is 08:00, an hour earlier, on standard time
+    atInstant('2026-01-15T13:00:00Z', () => expect(getTorontoNowTime()).toBe('08:00'));
+  });
+
+  test('pads to a zero-filled 24 hour clock', () => {
+    atInstant('2026-08-22T05:04:00Z', () => expect(getTorontoNowTime()).toBe('01:04'));
+    // midnight must be 00:00, never 24:00
+    atInstant('2026-08-22T04:00:00Z', () => expect(getTorontoNowTime()).toBe('00:00'));
   });
 });

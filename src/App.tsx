@@ -25,6 +25,7 @@ import {
   getIndexInfo as calcIndexInfo,
   getLunchMinutes,
   getOriginalHours,
+  getTorontoNowTime,
   getTorontoToday,
   isUnlawfulRuleJob,
   parseYmdLocal,
@@ -513,6 +514,22 @@ export default function App(): JSX.Element {
     });
   };
 
+  /**
+   * One button for the whole day: the first tap stamps the start time, the
+   * second stamps the end. Once both are set the day is finished and the
+   * button stops accepting taps, so a stray press cannot wipe the start time.
+   * Corrections go through the day editor in the calendar.
+   */
+  const handleCheckInOut = () => {
+    const now = getTorontoNowTime();
+    const field = todayEntry?.start ? "end" : "start";
+    if (field === "end" && todayEntry?.end) return;
+    handleTimeInput(todayStr, field, dayjs(now, "HH:mm"));
+    notify(
+      `${field === "start" ? labels[lang].checkedInNotice : labels[lang].checkedOutNotice} ${now}`
+    );
+  };
+
   const handleLunchMinutesInput = (date: string, raw: string) => {
     const trimmed = raw.trim();
     if (trimmed === "") {
@@ -789,6 +806,9 @@ export default function App(): JSX.Element {
   const rows = Math.ceil(totalCells / 7);
   const totalGrid = rows * 7;
   const todayStr = ymd(getTorontoToday());
+  const todayEntry = dayHours.find(d => d.date === todayStr);
+  const checkedIn = Boolean(todayEntry?.start);
+  const checkedOut = Boolean(todayEntry?.start && todayEntry?.end);
 
   useLayoutEffect(() => {
     if (!calGridRef.current || rows <= 0) return;
@@ -887,6 +907,14 @@ export default function App(): JSX.Element {
       lunchMinutesLabel: "Lunch (min)",
       resetHours: "Reset Hours",
       done: "Done",
+      checkIn: "Check In",
+      checkOut: "Check Out",
+      checkedInAt: "Checked in at",
+      checkedOutToday: "Done for today",
+      today: "Today",
+      notStarted: "Not started",
+      checkedInNotice: "Checked in at",
+      checkedOutNotice: "Checked out at",
       startTime: "Start",
       endTime: "End",
       hoursWorked: "Hours",
@@ -967,6 +995,14 @@ export default function App(): JSX.Element {
       lunchMinutesLabel: "午休(分鐘)",
       resetHours: "重設工時",
       done: "完成",
+      checkIn: "上班打卡",
+      checkOut: "下班打卡",
+      checkedInAt: "上班時間",
+      checkedOutToday: "今日已完成",
+      today: "今天",
+      notStarted: "尚未開始",
+      checkedInNotice: "已打卡上班",
+      checkedOutNotice: "已打卡下班",
       startTime: "上班",
       endTime: "下班",
       hoursWorked: "工時",
@@ -1126,6 +1162,31 @@ export default function App(): JSX.Element {
             {labels[lang].removeJob}
           </button>
         </div>
+      </div>
+
+      {/* one-tap check in / check out for today */}
+      <div className="card check-card">
+        <div className="check-meta">
+          <span className="label">{labels[lang].today} · {todayStr}</span>
+          <span className="check-status">
+            {checkedOut
+              ? `${todayEntry?.start} – ${todayEntry?.end} · ${(todayEntry?.hours ?? 0).toFixed(2)}h`
+              : checkedIn
+                ? `${labels[lang].checkedInAt} ${todayEntry?.start}`
+                : labels[lang].notStarted}
+          </span>
+        </div>
+        <button
+          className={`btn check-btn ${checkedOut ? "" : checkedIn ? "warn" : "success"}`}
+          onClick={handleCheckInOut}
+          disabled={checkedOut}
+        >
+          {checkedOut
+            ? labels[lang].checkedOutToday
+            : checkedIn
+              ? labels[lang].checkOut
+              : labels[lang].checkIn}
+        </button>
       </div>
 
       {/* Information */}

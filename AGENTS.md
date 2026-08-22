@@ -139,6 +139,20 @@ daylight-saving change and shifts every later date into the wrong week and pay p
 `parseYmdLocal` (local midnight) — do **not** use `new Date("YYYY-MM-DD")`, which is UTC and
 shifts the day. `getTorontoToday()` anchors "today" to Toronto time.
 
+## Check in / check out
+
+`.check-card` sits above the Information panel and is the app's primary daily
+action. `handleCheckInOut` runs a three-state machine on **today's entry for the
+active job**: no start yet stamps `start`, a start without an end stamps `end`,
+and once both are set the button is disabled. That last state matters — without
+it a stray tap would overwrite the morning's start time. Corrections go through
+the calendar's day editor instead.
+
+Times come from `getTorontoNowTime()` in `calc.ts`, not the device clock, so the
+stamp agrees with the Toronto date `getTorontoToday()` files it under. Hours are
+computed by the existing `handleTimeInput`, so lunch is deducted the same way it
+is for a manually typed shift.
+
 ## Layout and responsiveness
 
 `src/App.css` is **mobile-first**. Base rules target a phone; two `min-width`

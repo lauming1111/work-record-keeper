@@ -247,6 +247,37 @@ header {
   flex: 0 0 auto;
 }
 
+/* ------------------------------------------------- check in / check out -- */
+
+.check-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.check-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.check-status {
+  font-size: var(--fs-md);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+/* qualified with .btn: the base button rule is declared after this block */
+.btn.check-btn {
+  width: 100%;
+  /* the primary daily action, so give it a bigger target than a normal button */
+  min-height: 56px;
+  font-size: 1.05rem;
+}
+.check-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+  transform: none;
+}
+
 /* ------------------------------------------------------------- buttons --- */
 
 .btn {
@@ -835,6 +866,13 @@ header {
   .title-blob { font-size: 2.2rem; text-align: left; }
   .header-actions { justify-content: flex-end; }
   .header-actions .header-btn { flex: 0 0 auto; min-width: 90px; }
+
+  .check-card {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .btn.check-btn { width: auto; min-width: 200px; }
 
   .info-grid { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--s3); }
   .value { font-size: var(--fs-lg); }
