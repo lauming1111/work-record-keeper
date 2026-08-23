@@ -504,6 +504,27 @@ test("wide tables label every cell so they can stack into cards on a phone", () 
 
 /* ---------------- one-tap check in / check out ---------------- */
 
+/**
+ * Freeze the clock for one test. Both `getTorontoNowTime` and `getTorontoToday`
+ * read `new Date()`, so this pins the stamp and the date it is filed under
+ * together. Constructor arguments still pass through, which dayjs relies on.
+ */
+const withFrozenClock = (iso: string, run: () => void) => {
+  const RealDate = Date;
+  class FrozenDate extends RealDate {
+    constructor(...args: any[]) {
+      if (args.length === 0) super(iso);
+      else super(...(args as [any]));
+    }
+    static now() { return new RealDate(iso).getTime(); }
+  }
+  (global as any).Date = FrozenDate;
+  try { run(); } finally { (global as any).Date = RealDate; }
+};
+
+/** 17:00 in Toronto, safely inside a normal working day. */
+const AFTERNOON = "2026-08-22T21:00:00Z";
+
 /** The date the app files "today" under, which is Toronto's, not the runner's. */
 const torontoToday = () => new Intl.DateTimeFormat("en-CA", {
   timeZone: "America/Toronto", year: "numeric", month: "2-digit", day: "2-digit",
@@ -548,17 +569,17 @@ test("checking in stamps a start time and offers the check out", () => {
 });
 
 test("checking out stamps the end time and works out the hours", () => {
-  // checked in at 09:00 with the default half hour of lunch
-  seedForCheckIn({ start: "09:00", end: "" });
-  render(<App />);
-  expect(checkButton()).toHaveTextContent("Check Out");
+  withFrozenClock(AFTERNOON, () => {
+    // checked in at 09:00 with the default half hour of lunch
+    seedForCheckIn({ start: "09:00", end: "" });
+    render(<App />);
+    expect(checkButton()).toHaveTextContent("Check Out");
 
-  fireEvent.click(checkButton()!);
+    fireEvent.click(checkButton()!);
 
-  const day = storedToday();
-  expect(day.end).toMatch(/^\d{2}:\d{2}$/);
-  const [h, m] = day.end.split(":").map(Number);
-  expect(day.hours).toBeCloseTo((h * 60 + m - 30 - 9 * 60) / 60, 5);
+    // 09:00 to 17:00 less the half hour
+    expect(storedToday()).toMatchObject({ end: "17:00", hours: 7.5 });
+  });
 });
 
 test("a finished day offers no stamp button, so nothing can be overwritten", () => {
@@ -627,4 +648,98 @@ test("the check in button tracks the active job, not the app as a whole", () => 
   fireEvent.click(screen.getByRole("button", { name: "Studio" }));
 
   expect(checkButton()).toHaveTextContent("Check In");
+});
+
+/* ---------------- stamping from a URL, for OS automations ---------------- */
+
+/** Put a query string on the current URL the way a Shortcuts automation would. */
+const visitWith = (query: string) => window.history.replaceState({}, "", query);
+
+afterEach(() => window.history.replaceState({}, "", "/"));
+
+test("?action=checkin stamps the start time on arrival", () => {
+  withFrozenClock(AFTERNOON, () => {
+    seedForCheckIn();
+    visitWith("/?action=checkin");
+    render(<App />);
+
+    expect(storedToday().start).toBe("17:00");
+    expect(checkStatus()).toBe("Checked in at 17:00");
+  });
+});
+
+test("?action=checkout stamps the end time and works out the hours", () => {
+  withFrozenClock(AFTERNOON, () => {
+    seedForCheckIn({ start: "09:00", end: "" });
+    visitWith("/?action=checkout");
+    render(<App />);
+
+    expect(storedToday()).toMatchObject({ end: "17:00", hours: 7.5 });
+  });
+});
+
+test("arriving again never overwrites the start time already recorded", () => {
+  seedForCheckIn({ start: "09:00", end: "" });
+  visitWith("/?action=checkin");
+  render(<App />);
+
+  expect(storedToday().start).toBe("09:00");
+  expect(screen.getByText("Already checked in at 09:00")).toBeInTheDocument();
+});
+
+test("leaving without having arrived records nothing", () => {
+  seedForCheckIn();
+  visitWith("/?action=checkout");
+  render(<App />);
+
+  expect(storedToday()).toBeUndefined();
+  expect(screen.getByText("Not checked in yet")).toBeInTheDocument();
+});
+
+test("leaving again does not move the end time on a finished day", () => {
+  seedForCheckIn({ start: "09:00", end: "17:00", hours: 7.5 });
+  visitWith("/?action=checkout");
+  render(<App />);
+
+  expect(storedToday()).toMatchObject({ start: "09:00", end: "17:00" });
+  expect(screen.getByText("Already checked out today")).toBeInTheDocument();
+});
+
+test("the action is stripped from the URL so a refresh cannot stamp twice", () => {
+  seedForCheckIn();
+  visitWith("/?action=checkin&lang=en");
+  render(<App />);
+
+  expect(window.location.search).toBe("?lang=en");
+  expect(window.location.search).not.toContain("action");
+});
+
+test("an unrecognised action is ignored and left in the URL alone", () => {
+  seedForCheckIn();
+  visitWith("/?action=explode");
+  render(<App />);
+
+  expect(storedToday()).toBeUndefined();
+  expect(checkStatus()).toBe("Not started");
+  expect(window.location.search).toBe("?action=explode");
+});
+
+/* ---------------- legal pages and the privacy claims ---------------- */
+
+test("the footer links to the privacy and terms pages", () => {
+  seedSingleJob();
+  render(<App />);
+
+  const privacy = screen.getByText("Privacy & Storage") as HTMLAnchorElement;
+  const terms = screen.getByText("Terms & Disclaimer") as HTMLAnchorElement;
+  expect(privacy.getAttribute("href")).toMatch(/\/privacy\.html$/);
+  expect(terms.getAttribute("href")).toMatch(/\/terms\.html$/);
+});
+
+test("using the app sets no cookies, which is what the privacy page claims", () => {
+  seedForCheckIn();
+  render(<App />);
+  fireEvent.click(checkButton()!);
+
+  expect(document.cookie).toBe("");
 });

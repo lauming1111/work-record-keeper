@@ -871,6 +871,14 @@ header {
   font-size: var(--fs-xs);
 }
 .disclaimer img { max-width: 160px; height: auto; }
+.legal-links {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--s3);
+  justify-content: center;
+  margin-top: var(--s1);
+}
+.legal-links a { color: var(--muted); }
 
 /* ========================================================================== */
 /* 700px and up — tablets: real tables, inline calendar controls              */

@@ -301,7 +301,11 @@ describe('getTorontoNowTime', () => {
   const atInstant = (iso: string, run: () => void) => {
     const RealDate = Date;
     class FrozenDate extends RealDate {
-      constructor() { super(iso); }
+      // arguments still pass through; only the argument-less form is pinned
+      constructor(...args: any[]) {
+        if (args.length === 0) super(iso);
+        else super(...(args as [any]));
+      }
       static now() { return new RealDate(iso).getTime(); }
     }
     (global as any).Date = FrozenDate;

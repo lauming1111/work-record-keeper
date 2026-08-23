@@ -153,6 +153,12 @@ steps the day back one stamp at a time: a finished day drops its `end` and is
 open again, and an open day drops its `start`, which removes the entry outright.
 The Undo button is only rendered once there is a start to undo.
 
+`/?action=checkin` and `/?action=checkout` stamp the day from the URL so a phone
+automation can trigger it — the web has no background geolocation and a service
+worker cannot read GPS, so the geofence has to live in the OS. The handler runs
+once per load, only ever moves the day forward, and strips the parameter with
+`history.replaceState` before doing anything, so a refresh cannot stamp twice.
+
 The card carries two state classes. `.compact` goes on as soon as the day has a
 start and collapses the card to a single row with a smaller button — the loud
 full-width treatment is only right while nothing has been logged yet. `.done`
