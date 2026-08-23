@@ -1,7 +1,7 @@
 {
-  "name": "buy",
+  "name": "work-record-keeper",
   "version": "0.1.5",
-  "homepage": "https://lauming1111.github.io/work-to-buy",
+  "homepage": "https://lauming1111.github.io/work-record-keeper",
   "private": true,
   "dependencies": {
     "@testing-library/dom": "^10.4.1",

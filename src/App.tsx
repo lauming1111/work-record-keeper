@@ -697,7 +697,7 @@ export default function App(): JSX.Element {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `work-to-buy-${ymd(new Date())}.json`;
+    a.download = `work-record-keeper-${ymd(new Date())}.json`;
     a.click();
     URL.revokeObjectURL(url);
     notify(labels[lang].exported);
@@ -719,7 +719,7 @@ export default function App(): JSX.Element {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `work-to-buy-all-${ymd(new Date())}.json`;
+    a.download = `work-record-keeper-all-${ymd(new Date())}.json`;
     a.click();
     URL.revokeObjectURL(url);
     notify(labels[lang].exportedAll);
