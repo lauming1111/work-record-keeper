@@ -71,6 +71,11 @@ handled so a refresh cannot stamp twice.
 ## Data Storage
 - Front-end only. All data stays in your browser `localStorage`.
 - Export/import JSON from the UI
+- No cookies, no analytics, no network requests. The app contacts nothing at
+  runtime; GitHub Pages logs requests as any host would.
+- `public/privacy.html` and `public/terms.html` are plain static pages, linked
+  from the footer. They load no scripts and no third-party assets, so they still
+  render if the app bundle fails. Keep them that way.
 
 ## Project Structure
 - `src/App.tsx` main UI and logic

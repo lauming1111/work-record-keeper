@@ -1,0 +1,114 @@
+/*
+ * Styling for the standalone legal pages. Deliberately self-contained: these
+ * pages must render even if the app bundle fails, so they load no fonts, no
+ * scripts and nothing from a third party.
+ */
+
+:root {
+  --muted: #667085;
+  --bg: #f7f8fa;
+  --card: #ffffff;
+  --text: #111827;
+  --link: #2563eb;
+  --border: #e6eef8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --muted: #9aa9bd;
+    --bg: #060f18;
+    --card: #0c1622;
+    --text: #e6eef8;
+    --link: #6ba6ff;
+    --border: rgba(255, 255, 255, 0.09);
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 24px 16px 64px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+}
+
+h1 { font-size: 1.6rem; margin: 0 0 4px; line-height: 1.2; }
+h2 { font-size: 1.15rem; margin: 32px 0 8px; }
+h3 { font-size: 1rem; margin: 20px 0 6px; }
+p, li { color: var(--text); }
+ul { padding-left: 20px; }
+li { margin: 6px 0; }
+
+a { color: var(--link); }
+
+.updated {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0 0 24px;
+}
+
+.lede {
+  font-size: 1.05rem;
+  border-left: 3px solid var(--link);
+  padding-left: 14px;
+  margin: 20px 0;
+}
+
+.callout {
+  border: 1px solid var(--border);
+  border-left: 3px solid #ffb020;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 20px 0;
+  background: rgba(255, 176, 32, 0.07);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 0.92rem;
+}
+th, td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+th { color: var(--muted); font-weight: 600; }
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  background: rgba(127, 127, 127, 0.12);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.nav {
+  max-width: 720px;
+  margin: 0 auto 16px;
+  display: flex;
+  gap: 16px;
+  font-size: 0.9rem;
+}
+
+footer {
+  max-width: 720px;
+  margin: 20px auto 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}

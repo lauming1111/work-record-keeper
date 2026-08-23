@@ -723,3 +723,23 @@ test("an unrecognised action is ignored and left in the URL alone", () => {
   expect(checkStatus()).toBe("Not started");
   expect(window.location.search).toBe("?action=explode");
 });
+
+/* ---------------- legal pages and the privacy claims ---------------- */
+
+test("the footer links to the privacy and terms pages", () => {
+  seedSingleJob();
+  render(<App />);
+
+  const privacy = screen.getByText("Privacy & Storage") as HTMLAnchorElement;
+  const terms = screen.getByText("Terms & Disclaimer") as HTMLAnchorElement;
+  expect(privacy.getAttribute("href")).toMatch(/\/privacy\.html$/);
+  expect(terms.getAttribute("href")).toMatch(/\/terms\.html$/);
+});
+
+test("using the app sets no cookies, which is what the privacy page claims", () => {
+  seedForCheckIn();
+  render(<App />);
+  fireEvent.click(checkButton()!);
+
+  expect(document.cookie).toBe("");
+});
