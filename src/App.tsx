@@ -530,6 +530,27 @@ export default function App(): JSX.Element {
     );
   };
 
+  /**
+   * Step the day back one stamp: a finished day drops its end time and is open
+   * again, and an open day drops its start and is untouched again. This is the
+   * way out of a mis-tap, which is why the finished state can stay locked.
+   */
+  const handleUndoCheck = () => {
+    if (!todayEntry?.start) return;
+    const undoingCheckOut = Boolean(todayEntry.end);
+    setDayHours(prev => {
+      const other = prev.filter(p => p.date !== todayStr);
+      const existing = prev.find(p => p.date === todayStr);
+      if (!existing) return prev;
+      if (undoingCheckOut) {
+        return [...other, { ...existing, end: "", hours: null }];
+      }
+      // dropping the start leaves nothing worth keeping for the day
+      return other;
+    });
+    notify(undoingCheckOut ? labels[lang].undoneCheckOut : labels[lang].undoneCheckIn);
+  };
+
   const handleLunchMinutesInput = (date: string, raw: string) => {
     const trimmed = raw.trim();
     if (trimmed === "") {
@@ -911,6 +932,9 @@ export default function App(): JSX.Element {
       checkOut: "Check Out",
       checkedInAt: "Checked in at",
       checkedOutToday: "Done for today",
+      undo: "Undo",
+      undoneCheckOut: "Check out undone",
+      undoneCheckIn: "Check in undone",
       today: "Today",
       notStarted: "Not started",
       checkedInNotice: "Checked in at",
@@ -999,6 +1023,9 @@ export default function App(): JSX.Element {
       checkOut: "下班打卡",
       checkedInAt: "上班時間",
       checkedOutToday: "今日已完成",
+      undo: "復原",
+      undoneCheckOut: "已復原下班打卡",
+      undoneCheckIn: "已復原上班打卡",
       today: "今天",
       notStarted: "尚未開始",
       checkedInNotice: "已打卡上班",
@@ -1165,9 +1192,12 @@ export default function App(): JSX.Element {
       </div>
 
       {/* one-tap check in / check out for today */}
-      <div className="card check-card">
+      <div className={`card check-card ${checkedIn ? "compact" : ""} ${checkedOut ? "done" : ""}`}>
         <div className="check-meta">
-          <span className="label">{labels[lang].today} · {todayStr}</span>
+          <span className="label">
+            {labels[lang].today} · {todayStr}
+            {checkedOut ? ` · ${labels[lang].checkedOutToday}` : ""}
+          </span>
           <span className="check-status">
             {checkedOut
               ? `${todayEntry?.start} – ${todayEntry?.end} · ${(todayEntry?.hours ?? 0).toFixed(2)}h`
@@ -1176,17 +1206,21 @@ export default function App(): JSX.Element {
                 : labels[lang].notStarted}
           </span>
         </div>
-        <button
-          className={`btn check-btn ${checkedOut ? "" : checkedIn ? "warn" : "success"}`}
-          onClick={handleCheckInOut}
-          disabled={checkedOut}
-        >
-          {checkedOut
-            ? labels[lang].checkedOutToday
-            : checkedIn
-              ? labels[lang].checkOut
-              : labels[lang].checkIn}
-        </button>
+        <div className="check-actions">
+          {!checkedOut && (
+            <button
+              className={`btn check-btn ${checkedIn ? "warn" : "success"}`}
+              onClick={handleCheckInOut}
+            >
+              {checkedIn ? labels[lang].checkOut : labels[lang].checkIn}
+            </button>
+          )}
+          {checkedIn && (
+            <button className="btn small check-undo" onClick={handleUndoCheck}>
+              {labels[lang].undo}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Information */}

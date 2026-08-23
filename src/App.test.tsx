@@ -519,7 +519,8 @@ const seedForCheckIn = (today?: Partial<{ start: string; end: string; hours: num
   ));
 };
 
-const checkButton = () => document.querySelector(".check-btn") as HTMLButtonElement;
+const checkButton = () => document.querySelector(".check-btn") as HTMLButtonElement | null;
+const undoButton = () => document.querySelector(".check-undo") as HTMLButtonElement | null;
 const checkStatus = () => (document.querySelector(".check-status") as HTMLElement).textContent;
 const storedToday = () =>
   JSON.parse(localStorage.getItem(jobStorageKey("cafe", "dayHours")) || "[]")
@@ -538,7 +539,7 @@ test("checking in stamps a start time and offers the check out", () => {
   seedForCheckIn();
   render(<App />);
 
-  fireEvent.click(checkButton());
+  fireEvent.click(checkButton()!);
 
   expect(storedToday().start).toMatch(/^\d{2}:\d{2}$/);
   expect(storedToday().end).toBe("");
@@ -552,7 +553,7 @@ test("checking out stamps the end time and works out the hours", () => {
   render(<App />);
   expect(checkButton()).toHaveTextContent("Check Out");
 
-  fireEvent.click(checkButton());
+  fireEvent.click(checkButton()!);
 
   const day = storedToday();
   expect(day.end).toMatch(/^\d{2}:\d{2}$/);
@@ -560,17 +561,53 @@ test("checking out stamps the end time and works out the hours", () => {
   expect(day.hours).toBeCloseTo((h * 60 + m - 30 - 9 * 60) / 60, 5);
 });
 
-test("a finished day is locked, so a stray tap cannot wipe the start time", () => {
+test("a finished day offers no stamp button, so nothing can be overwritten", () => {
   seedForCheckIn({ start: "09:00", end: "17:00", hours: 7.5 });
   render(<App />);
 
-  expect(checkButton()).toHaveTextContent("Done for today");
-  expect(checkButton()).toBeDisabled();
+  expect(checkButton()).toBeNull();
   expect(checkStatus()).toBe("09:00 – 17:00 · 7.50h");
+  expect(document.querySelector(".check-card")).toHaveClass("done");
+});
 
-  fireEvent.click(checkButton());
+test("the card shrinks once the day is under way", () => {
+  seedForCheckIn();
+  render(<App />);
+  expect(document.querySelector(".check-card")).not.toHaveClass("compact");
 
-  expect(storedToday()).toMatchObject({ start: "09:00", end: "17:00" });
+  fireEvent.click(checkButton()!);
+
+  expect(document.querySelector(".check-card")).toHaveClass("compact");
+});
+
+test("undo steps a finished day back to its check out", () => {
+  seedForCheckIn({ start: "09:00", end: "17:00", hours: 7.5 });
+  render(<App />);
+
+  fireEvent.click(undoButton()!);
+
+  expect(storedToday()).toMatchObject({ start: "09:00", end: "" });
+  expect(storedToday().hours).toBeNull();
+  expect(checkButton()).toHaveTextContent("Check Out");
+});
+
+test("undo again clears the check in and the day goes back to untouched", () => {
+  seedForCheckIn({ start: "09:00", end: "" });
+  render(<App />);
+
+  fireEvent.click(undoButton()!);
+
+  expect(storedToday()).toBeUndefined();
+  expect(checkButton()).toHaveTextContent("Check In");
+  expect(checkStatus()).toBe("Not started");
+  // nothing to undo from here
+  expect(undoButton()).toBeNull();
+});
+
+test("a day that was never started has nothing to undo", () => {
+  seedForCheckIn();
+  render(<App />);
+  expect(undoButton()).toBeNull();
 });
 
 test("the check in button tracks the active job, not the app as a whole", () => {
