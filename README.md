@@ -40,8 +40,8 @@ npm run deploy
 The app can stamp a shift straight from a URL:
 
 ```
-https://lauming1111.github.io/work-to-buy/?action=checkin
-https://lauming1111.github.io/work-to-buy/?action=checkout
+https://lauming1111.github.io/work-record-keeper/?action=checkin
+https://lauming1111.github.io/work-record-keeper/?action=checkout
 ```
 
 Point a location automation at those and arriving at work checks you in.

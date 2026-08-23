@@ -9,7 +9,7 @@ earnings (Ontario/Canada-style deductions), keeps roster images, and tracks prog
 list of things they want to buy. No backend, no API calls: everything lives in `localStorage`
 and can be exported/imported as JSON.
 
-Deployed to GitHub Pages at `https://lauming1111.github.io/work-to-buy` (see `homepage` in
+Deployed to GitHub Pages at `https://lauming1111.github.io/work-record-keeper` (see `homepage` in
 `package.json` — it drives the asset base path, don't change it casually).
 
 ## Stack
