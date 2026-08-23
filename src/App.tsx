@@ -831,6 +831,58 @@ export default function App(): JSX.Element {
   const checkedIn = Boolean(todayEntry?.start);
   const checkedOut = Boolean(todayEntry?.start && todayEntry?.end);
 
+  /*
+   * Stamp from the URL: /?action=checkin or /?action=checkout.
+   *
+   * The web cannot geofence on its own — a service worker has no access to
+   * geolocation, and a backgrounded tab is frozen — so the trigger has to come
+   * from the operating system. An iOS Shortcuts "when I arrive at work"
+   * automation, or an Android routine, opens one of these URLs and the app
+   * stamps the time. See README.
+   *
+   * Runs once per load, and only ever moves the day forward: arriving when
+   * already checked in reports the existing time rather than overwriting it.
+   */
+  const urlActionRan = useRef(false);
+  useEffect(() => {
+    if (urlActionRan.current) return;
+    urlActionRan.current = true;
+
+    const params = new URLSearchParams(window.location.search);
+    const action = params.get("action");
+    if (action !== "checkin" && action !== "checkout") return;
+
+    // Drop the parameter first: a refresh or a back-navigation must not stamp again.
+    params.delete("action");
+    const query = params.toString();
+    window.history.replaceState({}, "", window.location.pathname + (query ? `?${query}` : "") + window.location.hash);
+
+    const entry = dayHours.find(d => d.date === todayStr);
+    const now = getTorontoNowTime();
+
+    if (action === "checkin") {
+      if (entry?.start) {
+        notify(`${labels[lang].alreadyCheckedIn} ${entry.start}`);
+        return;
+      }
+      handleTimeInput(todayStr, "start", dayjs(now, "HH:mm"));
+      notify(`${labels[lang].checkedInNotice} ${now}`);
+      return;
+    }
+
+    if (!entry?.start) {
+      notify(labels[lang].notCheckedIn);
+      return;
+    }
+    if (entry.end) {
+      notify(labels[lang].alreadyCheckedOut);
+      return;
+    }
+    handleTimeInput(todayStr, "end", dayjs(now, "HH:mm"));
+    notify(`${labels[lang].checkedOutNotice} ${now}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useLayoutEffect(() => {
     if (!calGridRef.current || rows <= 0) return;
     const node = calGridRef.current;
@@ -935,6 +987,9 @@ export default function App(): JSX.Element {
       undo: "Undo",
       undoneCheckOut: "Check out undone",
       undoneCheckIn: "Check in undone",
+      alreadyCheckedIn: "Already checked in at",
+      alreadyCheckedOut: "Already checked out today",
+      notCheckedIn: "Not checked in yet",
       today: "Today",
       notStarted: "Not started",
       checkedInNotice: "Checked in at",
@@ -1026,6 +1081,9 @@ export default function App(): JSX.Element {
       undo: "復原",
       undoneCheckOut: "已復原下班打卡",
       undoneCheckIn: "已復原上班打卡",
+      alreadyCheckedIn: "已於此時間打卡上班",
+      alreadyCheckedOut: "今日已完成打卡",
+      notCheckedIn: "尚未打卡上班",
       today: "今天",
       notStarted: "尚未開始",
       checkedInNotice: "已打卡上班",
