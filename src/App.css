@@ -664,6 +664,11 @@ header {
   font-size: var(--fs-xs);
   color: var(--muted);
 }
+.day-overnight-note {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--amber);
+}
 .day-reset { width: 100%; }
 
 .day-sheet-head {

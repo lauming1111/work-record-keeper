@@ -743,3 +743,148 @@ test("using the app sets no cookies, which is what the privacy page claims", () 
 
   expect(document.cookie).toBe("");
 });
+
+/* ---------------- overnight shifts ---------------- */
+
+test("a shift ending before it starts is treated as crossing midnight, not discarded", () => {
+  // `hours` is derived, not stored raw -- it's only computed when the app
+  // itself runs the math, via handleTimeInput or (here) a lunch edit. Seeding
+  // start/end alone and reading it back would test the seed, not the fix.
+  const restore = setNarrowViewport(true);
+  try {
+    localStorage.setItem("w2b_jobs", JSON.stringify([{ id: "cafe", name: "Cafe" }]));
+    localStorage.setItem("w2b_activeJob", "cafe");
+    localStorage.setItem(jobStorageKey("cafe", "hourlyRate"), "20");
+    localStorage.setItem(jobStorageKey("cafe", "startDate"), "2026-01-01");
+    localStorage.setItem(jobStorageKey("cafe", "currentDate"), new Date("2026-01-15T00:00:00Z").toISOString());
+    localStorage.setItem(jobStorageKey("cafe", "dayHours"), JSON.stringify([
+      { date: "2026-01-05", start: "21:00", end: "05:00" },
+    ]));
+    render(<App />);
+
+    fireEvent.click(document.querySelector('.cal-cell-compact[aria-label^="2026-01-05"]')!);
+    const sheet = document.querySelector(".day-sheet") as HTMLElement;
+    fireEvent.change(sheet.querySelector(".lunch-minutes-input")!, { target: { value: "30" } });
+
+    // 21:00 to 05:00 is 8h; a 30 minute lunch leaves 7.5, filed under the 5th
+    const stored = JSON.parse(localStorage.getItem(jobStorageKey("cafe", "dayHours")) || "[]")
+      .find((d: { date: string }) => d.date === "2026-01-05");
+    expect(stored.hours).toBeCloseTo(7.5, 5);
+    expect(document.querySelector('.cal-cell-compact[aria-label^="2026-01-05"]')!.textContent).toContain("7.50h");
+  } finally {
+    restore();
+  }
+});
+
+test("the day editor flags a shift that runs past midnight", () => {
+  const restore = setNarrowViewport(true);
+  try {
+    localStorage.setItem("w2b_jobs", JSON.stringify([{ id: "cafe", name: "Cafe" }]));
+    localStorage.setItem("w2b_activeJob", "cafe");
+    localStorage.setItem(jobStorageKey("cafe", "hourlyRate"), "20");
+    localStorage.setItem(jobStorageKey("cafe", "startDate"), "2026-01-01");
+    localStorage.setItem(jobStorageKey("cafe", "currentDate"), new Date("2026-01-15T00:00:00Z").toISOString());
+    localStorage.setItem(jobStorageKey("cafe", "dayHours"), JSON.stringify([
+      { date: "2026-01-05", start: "21:00", end: "05:00", lunchMinutes: 30 },
+    ]));
+    render(<App />);
+
+    fireEvent.click(document.querySelector('.cal-cell-compact[aria-label^="2026-01-05"]')!);
+
+    expect(screen.getByText(/Ends after midnight/)).toBeInTheDocument();
+  } finally {
+    restore();
+  }
+});
+
+test("an ordinary same-day shift shows no overnight note", () => {
+  const restore = setNarrowViewport(true);
+  try {
+    seedForCheckIn({ start: "09:00", end: "17:00", hours: 7.5 });
+    render(<App />);
+
+    fireEvent.click(document.querySelector(`.cal-cell-compact[aria-label^="${torontoToday()}"]`)!);
+
+    expect(screen.queryByText(/Ends after midnight/)).not.toBeInTheDocument();
+  } finally {
+    restore();
+  }
+});
+
+/* ---------------- malformed data cannot brick the app ---------------- */
+
+test("a single-job import with a broken date is dropped, not crashed on", async () => {
+  render(<App />);
+  const payload = {
+    items: [],
+    hourlyRate: 20,
+    startDate: "2026-01-01",
+    dayHours: [
+      { date: 20260101, hours: 8 }, // numeric date: previously threw inside the calculator
+      { date: "2026-01-02", hours: 8 },
+    ],
+    payCycle: "biweekly",
+    roster: { weekly: {}, monthly: {} },
+  };
+  const file = new File([JSON.stringify(payload)], "import.json", { type: "application/json" }) as MockFile;
+  file.__text = JSON.stringify(payload);
+
+  const importLabel = screen.getByText("Import Data").closest("label");
+  const importInput = importLabel!.querySelector("input[type=\"file\"]") as HTMLInputElement;
+  fireEvent.change(importInput, { target: { files: [file] } });
+
+  await waitFor(() => {
+    expect(screen.getByText("Imported data")).toBeInTheDocument();
+  });
+  // the one valid day survived and priced correctly, in more than one place
+  // (the info tile and the period summary); nothing crashed rendering it
+  expect(screen.getAllByText("$161.80").length).toBeGreaterThan(0);
+});
+
+test("an all-jobs import with a broken date on another job doesn't crash the summary table", async () => {
+  localStorage.setItem("w2b_jobs", JSON.stringify([{ id: "cafe", name: "Cafe" }]));
+  localStorage.setItem("w2b_activeJob", "cafe");
+  seedJob("cafe", "20", 8);
+  render(<App />);
+
+  const payload = {
+    type: "w2b_all_jobs",
+    version: 1,
+    activeJobId: "cafe",
+    jobs: [{ id: "cafe", name: "Cafe" }, { id: "studio", name: "Studio" }],
+    jobData: {
+      cafe: { items: [], hourlyRate: 20, startDate: "2026-01-01", dayHours: [{ date: "2026-01-02", hours: 8 }], payCycle: "biweekly", roster: { weekly: {}, monthly: {} } },
+      // studio is not the active job, so this is read back out via loadJobData
+      // when the all-jobs summary renders, not set directly on state
+      studio: { items: [], hourlyRate: 30, startDate: "2026-01-01", dayHours: [{ date: null, hours: 8 }, { date: "2026-01-03", hours: 8 }], payCycle: "biweekly", roster: { weekly: {}, monthly: {} } },
+    },
+  };
+  const file = new File([JSON.stringify(payload)], "all.json", { type: "application/json" }) as MockFile;
+  file.__text = JSON.stringify(payload);
+
+  const importLabel = screen.getByText("Import Data").closest("label");
+  const importInput = importLabel!.querySelector("input[type=\"file\"]") as HTMLInputElement;
+  fireEvent.change(importInput, { target: { files: [file] } });
+
+  await waitFor(() => {
+    expect(screen.getByText("Imported all jobs")).toBeInTheDocument();
+  });
+  expect(within(document.querySelector(".all-jobs-table") as HTMLElement).getByText("Studio")).toBeInTheDocument();
+});
+
+test("data corrupted in storage by an earlier bug does not crash the app on load", () => {
+  localStorage.setItem("w2b_jobs", JSON.stringify([{ id: "cafe", name: "Cafe" }]));
+  localStorage.setItem("w2b_activeJob", "cafe");
+  localStorage.setItem(jobStorageKey("cafe", "hourlyRate"), "20");
+  localStorage.setItem(jobStorageKey("cafe", "startDate"), "2026-01-01");
+  localStorage.setItem(jobStorageKey("cafe", "dayHours"), JSON.stringify([
+    { date: null, hours: 8 },
+    { date: {}, hours: 8 },
+    { date: "2026-01-02", hours: 8 },
+  ]));
+
+  render(<App />);
+
+  expect(screen.getByText("Work Record Keeper")).toBeInTheDocument();
+  expect(screen.getAllByText("$161.80").length).toBeGreaterThan(0);
+});

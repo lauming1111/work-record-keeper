@@ -1,6 +1,6 @@
-﻿import React, { JSX, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { JSX, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
-import dayjs, { Dayjs } from 'dayjs';
+import dayjs from 'dayjs';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
 import { TimePicker } from "antd";
 import ram from './fun-images/rick-y-morty-rick.png';
@@ -22,6 +22,7 @@ import {
   WEEKLY_OVERTIME_THRESHOLD,
   clampLunchMinutes,
   computeDetailedDays,
+  computeShiftHours,
   getIndexInfo as calcIndexInfo,
   getLunchMinutes,
   getOriginalHours,
@@ -30,6 +31,8 @@ import {
   isUnlawfulRuleJob,
   parseYmdLocal,
   round2,
+  sanitizeDayHours,
+  shiftCrossesMidnight,
   summarizeJobs,
   ymd,
 } from "./calc";
@@ -282,14 +285,6 @@ export default function App(): JSX.Element {
     });
   };
 
-  const zoomInRoster = () => {
-    setRosterViewer(prev => {
-      if (!prev) return prev;
-      const nextScale = Math.min(3, Math.round((prev.scale + 0.1) * 100) / 100);
-      return { ...prev, scale: nextScale };
-    });
-  };
-
   const getSemiMonthlyInfo = (dateStr: string) => {
     const dt = parseYmdLocal(dateStr);
     const year = dt.getFullYear();
@@ -500,16 +495,9 @@ export default function App(): JSX.Element {
       const lunchMinutes = getLunchMinutes(existing);
       const updated = { ...existing, [field]: value?.format("HH:mm"), lunchMinutes };
 
-      let hours: number | null = null;
-      if (updated.start && updated.end) {
-        const [sh, sm] = updated.start.split(":").map(Number);
-        const [eh, em] = updated.end.split(":").map(Number);
-        const startMins = sh * 60 + sm;
-        let endMins = eh * 60 + em;
-        endMins -= lunchMinutes;
-        hours = (endMins - startMins) / 60;
-        if (hours < 0 || hours > 24) hours = null;
-      }
+      const hours = updated.start && updated.end
+        ? computeShiftHours(updated.start, updated.end, lunchMinutes)
+        : null;
       return [...other, { ...updated, hours }];
     });
   };
@@ -572,13 +560,7 @@ export default function App(): JSX.Element {
       const originalHours = getOriginalHours(updated);
 
       if (updated.start && updated.end) {
-        const [sh, sm] = updated.start.split(":").map(Number);
-        const [eh, em] = updated.end.split(":").map(Number);
-        const startMins = sh * 60 + sm;
-        const endMins = eh * 60 + em;
-        let hours = (endMins - startMins) / 60;
-        hours -= lunchMinutes / 60;
-        updated.hours = (hours >= 0 && hours <= 24) ? round2(hours) : null;
+        updated.hours = computeShiftHours(updated.start, updated.end, lunchMinutes);
       } else if (originalHours != null && (!updated.start && !updated.end)) {
         updated.originalHours = originalHours;
         updated.hours = Math.max(0, round2(originalHours - lunchMinutes / 60));
@@ -654,7 +636,9 @@ export default function App(): JSX.Element {
     const hourlyRate = raw && raw.hourlyRate != null && !isNaN(Number(raw.hourlyRate))
       ? Number(raw.hourlyRate)
       : fallback.hourlyRate;
-    const dayHours = raw && Array.isArray(raw.dayHours) ? raw.dayHours : fallback.dayHours;
+    // Validated, not just shape-checked: an imported file is as untrusted as
+    // anything else on disk, and a bad date here used to crash every reload.
+    const dayHours = sanitizeDayHours(raw?.dayHours);
     const startDate = raw && typeof raw.startDate === "string" && raw.startDate ? raw.startDate : fallback.startDate;
     const currentDateCandidate = raw && raw.currentDate ? new Date(raw.currentDate) : fallback.currentDate;
     const currentDate = isNaN(currentDateCandidate.getTime()) ? fallback.currentDate : currentDateCandidate;
@@ -784,7 +768,7 @@ export default function App(): JSX.Element {
           setRoster(rosterParsed);
         }
         if (parsed.startDate) setStartDate(parsed.startDate);
-        if (parsed.dayHours) setDayHours(parsed.dayHours);
+        if (parsed.dayHours) setDayHours(sanitizeDayHours(parsed.dayHours));
         notify(labels[lang].imported);
       } catch (err) {
         notify(labels[lang].invalidImport);
@@ -802,7 +786,6 @@ export default function App(): JSX.Element {
     notify("Saved");
   };
 
-  const clearAll = () => setShowClearConfirm(true);
   const confirmClearAll = () => {
     clearJobStorage(activeJobId);
     setItems(cloneDefaultItems());
@@ -997,6 +980,7 @@ export default function App(): JSX.Element {
       startTime: "Start",
       endTime: "End",
       hoursWorked: "Hours",
+      overnightNote: "Ends after midnight \u2014 hours are filed under this date.",
       afterTaxLabel: "After tax",
       tapToEdit: "Tap a day to enter hours",
       prevMonth: "Prev",
@@ -1093,6 +1077,7 @@ export default function App(): JSX.Element {
       startTime: "上班",
       endTime: "下班",
       hoursWorked: "工時",
+      overnightNote: "跨夜班別，時數計入此日期。",
       afterTaxLabel: "稅後",
       tapToEdit: "點選日期輸入工時",
       prevMonth: "上個月",
@@ -1168,6 +1153,10 @@ export default function App(): JSX.Element {
             />
           </label>
         </div>
+
+        {rawEntry?.start && rawEntry?.end && shiftCrossesMidnight(rawEntry.start, rawEntry.end) && (
+          <p className="day-overnight-note">{labels[lang].overnightNote}</p>
+        )}
 
         <label className="day-field">
           <span className="day-field-label">{labels[lang].hoursWorked}</span>
@@ -1824,7 +1813,7 @@ export default function App(): JSX.Element {
           <a href={`${process.env.PUBLIC_URL}/terms.html`}>{labels[lang].termsPage}</a>
         </span>
         <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3 }}>
-          <img src={ram} style={{ width: "40%", height: "40%", marginLeft: 4, marginTop: 3, verticalAlign: "middle" }} />
+          <img src={ram} alt="" style={{ width: "40%", height: "40%", marginLeft: 4, marginTop: 3, verticalAlign: "middle" }} />
         </div>
       </div>
 
@@ -1841,74 +1830,4 @@ const BIWEEK_COLORS = [
   "#f9fbe7", // light lime
 ];
 
-function CustomTimeInput({
-  value,
-  onChange,
-  label,
-}: {
-  value: string | null | undefined;
-  onChange: (val: string) => void;
-  label: string;
-}) {
-  const [hour, setHour] = useState<string>(() => value?.split(":")[0] ?? "");
-  const [minute, setMinute] = useState<string>(() => value?.split(":")[1] ?? "");
-
-  useEffect(() => {
-    if (value) {
-      const [h, m] = value.split(":");
-      setHour(h);
-      setMinute(m);
-    }
-  }, [value]);
-
-  const handleHour = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let h = e.target.value.replace(/\D/g, "");
-    if (h.length > 2) h = h.slice(0, 2);
-    if (h && (+h < 0 || +h > 23)) return;
-    setHour(h);
-    // Only pad when saving to state, not when typing
-    if (minute !== "") {
-      onChange(`${h.padStart(2, "0")}:${minute.padStart(2, "0")}`);
-    } else {
-      onChange("");
-    }
-  };
-
-  const handleMinute = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let m = e.target.value.replace(/\D/g, "");
-    if (m.length > 2) m = m.slice(0, 2);
-    if (m && (+m < 0 || +m > 59)) return;
-    setMinute(m);
-    // Only pad when saving to state, not when typing
-    if (hour !== "") {
-      onChange(`${hour.padStart(2, "0")}:${m.padStart(2, "0")}`);
-    } else {
-      onChange("");
-    }
-  };
-
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-      <input
-        type="number"
-        min={0}
-        max={23}
-        value={hour}
-        onChange={handleHour}
-        placeholder={label ? `${label} HH` : "HH"}
-        style={{ width: 40, fontSize: 16 }}
-      />
-      :
-      <input
-        type="number"
-        min={0}
-        max={59}
-        value={minute}
-        onChange={handleMinute}
-        placeholder="MM"
-        style={{ width: 40, fontSize: 16 }}
-      />
-    </div>
-  );
-}
 

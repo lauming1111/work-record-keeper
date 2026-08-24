@@ -4,12 +4,15 @@ import {
   clampLunchMinutes,
   computeDetailedDays,
   computeJobEarnings,
+  computeShiftHours,
   getIndexInfo,
   getTorontoNowTime,
   getLunchMinutes,
   getPeriodKey,
   getOriginalHours,
   isUnlawfulRuleJob,
+  sanitizeDayHours,
+  shiftCrossesMidnight,
   summarizeJobs,
 } from './calc';
 
@@ -326,5 +329,97 @@ describe('getTorontoNowTime', () => {
     atInstant('2026-08-22T05:04:00Z', () => expect(getTorontoNowTime()).toBe('01:04'));
     // midnight must be 00:00, never 24:00
     atInstant('2026-08-22T04:00:00Z', () => expect(getTorontoNowTime()).toBe('00:00'));
+  });
+});
+
+describe('computeShiftHours', () => {
+  test('a same-day shift subtracts lunch as before', () => {
+    expect(computeShiftHours('09:00', '17:00', 30)).toBe(7.5);
+  });
+
+  test('a shift ending before it starts is treated as crossing midnight', () => {
+    // 21:00 to 05:00 is 8 hours; a 30 minute lunch leaves 7.5
+    expect(computeShiftHours('21:00', '05:00', 30)).toBe(7.5);
+  });
+
+  test('equal start and end is zero hours, not a 24 hour shift', () => {
+    expect(computeShiftHours('09:00', '09:00', 0)).toBe(0);
+  });
+
+  test('a lunch longer than the shift is rejected, same-day or overnight', () => {
+    expect(computeShiftHours('09:00', '09:15', 30)).toBeNull();
+    expect(computeShiftHours('23:00', '01:00', 180)).toBeNull();
+  });
+
+  test('a span over 24 hours is rejected', () => {
+    // this cannot happen through wraparound alone (max span is just under
+    // 24h), so this only fires on already-corrupted input
+    expect(computeShiftHours('00:00', '00:00', -1500)).toBeNull();
+  });
+});
+
+describe('shiftCrossesMidnight', () => {
+  test('true when the end clock time is earlier than the start', () => {
+    expect(shiftCrossesMidnight('21:00', '05:00')).toBe(true);
+  });
+
+  test('false for an ordinary same-day shift, and for equal times', () => {
+    expect(shiftCrossesMidnight('09:00', '17:00')).toBe(false);
+    expect(shiftCrossesMidnight('09:00', '09:00')).toBe(false);
+  });
+});
+
+describe('sanitizeDayHours', () => {
+  test('keeps a well-formed entry as-is', () => {
+    const entry = { date: '2026-01-01', start: '09:00', end: '17:00', hours: 7.5, lunchMinutes: 30 };
+    expect(sanitizeDayHours([entry])).toEqual([entry]);
+  });
+
+  test('drops entries whose date will not parse, without touching the rest', () => {
+    const good: DayHours = { date: '2026-01-02', hours: 8 };
+    const bad = [
+      { date: 20260101, hours: 8 },
+      { date: null, hours: 8 },
+      { date: {}, hours: 8 },
+      { date: 'not-a-date', hours: 8 },
+      good,
+    ];
+    expect(sanitizeDayHours(bad)).toEqual([good]);
+  });
+
+  test('drops a malformed start or end instead of the whole day', () => {
+    const out = sanitizeDayHours([{ date: '2026-01-01', start: 'nine oclock', end: '17:00', hours: 8 }]);
+    expect(out).toEqual([{ date: '2026-01-01', end: '17:00', hours: 8 }]);
+  });
+
+  test('a non-numeric hours field is dropped rather than kept as a string', () => {
+    const out = sanitizeDayHours([{ date: '2026-01-01', hours: 'a lot' }]);
+    expect(out).toEqual([{ date: '2026-01-01' }]);
+  });
+
+  test('lunchMinutes is clamped the same way a direct edit would be', () => {
+    expect(sanitizeDayHours([{ date: '2026-01-01', lunchMinutes: 9999 }])).toEqual([
+      { date: '2026-01-01', lunchMinutes: 180 },
+    ]);
+  });
+
+  test('non-array input produces no entries, not a throw', () => {
+    expect(sanitizeDayHours(null)).toEqual([]);
+    expect(sanitizeDayHours(undefined)).toEqual([]);
+    expect(sanitizeDayHours('not an array')).toEqual([]);
+    expect(sanitizeDayHours({ 0: { date: '2026-01-01' } })).toEqual([]);
+  });
+
+  test('a sanitized import never reaches computeDetailedDays in a state that throws', () => {
+    const poisoned = [
+      { date: 20260101, hours: 8 },
+      { date: null, hours: 8 },
+      { date: '2026-01-05', hours: 8 },
+    ];
+    expect(() => computeDetailedDays({
+      dayHours: sanitizeDayHours(poisoned),
+      hourlyRate: 20,
+      startDate: '2026-01-05',
+    })).not.toThrow();
   });
 });

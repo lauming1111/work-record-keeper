@@ -6,6 +6,7 @@ import {
   RosterData,
   defaultItems,
   getTorontoToday,
+  sanitizeDayHours,
   ymd,
 } from "./calc";
 
@@ -93,7 +94,9 @@ export const loadJobData = (jobId: string) => {
   const items = safeParse<Item[]>(readJobStorage(jobId, "items"), fallback.items);
   const hourlyRateRaw = readJobStorage(jobId, "hourlyRate");
   const hourlyRate = hourlyRateRaw != null && !isNaN(Number(hourlyRateRaw)) ? Number(hourlyRateRaw) : fallback.hourlyRate;
-  const dayHours = safeParse<DayHours[]>(readJobStorage(jobId, "dayHours"), fallback.dayHours);
+  // Validated, not just parsed: bad data here (an old bug, a hand edit, a
+  // corrupted browser profile) would otherwise crash every load.
+  const dayHours = sanitizeDayHours(safeParse<unknown[]>(readJobStorage(jobId, "dayHours"), fallback.dayHours));
   const startDate = readJobStorage(jobId, "startDate") || fallback.startDate;
   const currentDateRaw = readJobStorage(jobId, "currentDate");
   const currentDateCandidate = currentDateRaw ? new Date(currentDateRaw) : fallback.currentDate;
