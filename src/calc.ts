@@ -168,6 +168,74 @@ export const getOriginalHours = (entry: DayHours) => {
   return null;
 };
 
+const toMinutes = (hhmm: string) => {
+  const [h, m] = hhmm.split(":").map(Number);
+  return h * 60 + m;
+};
+
+/**
+ * Hours between a start and end "HH:MM", minus a lunch break already in
+ * minutes. If `end` is earlier than `start` the shift is assumed to cross
+ * midnight -- a night shift is filed under the date it began, not split --
+ * rather than negative. Returns null if the lunch outweighs the shift or the
+ * span exceeds a day, since either means the inputs don't describe a real one.
+ */
+export function computeShiftHours(start: string, end: string, lunchMinutes: number): number | null {
+  const startMins = toMinutes(start);
+  let endMins = toMinutes(end);
+  if (endMins < startMins) endMins += 24 * 60;
+  const hours = (endMins - startMins - lunchMinutes) / 60;
+  return hours >= 0 && hours <= 24 ? round2(hours) : null;
+}
+
+/** True when `computeShiftHours` would treat this start/end as an overnight shift. */
+export function shiftCrossesMidnight(start: string, end: string): boolean {
+  return toMinutes(end) < toMinutes(start);
+}
+
+const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
+const HHMM_RE = /^\d{2}:\d{2}$/;
+
+const toFiniteNumberOrNull = (value: unknown): number | null => {
+  if (value == null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+
+/**
+ * Validate a day-hours array from an untrusted source: an imported file, or
+ * whatever a previous version of the app (or a hand edit) left in
+ * localStorage. A date that will not parse makes the entry meaningless and is
+ * dropped; every other field is coerced to a safe value or dropped on its
+ * own, so one bad field doesn't cost the whole day. Without this, a single
+ * malformed date reaches `parseYmdLocal` and throws, which crashes the app on
+ * every load until the browser's storage is cleared by hand.
+ */
+export function sanitizeDayHours(raw: unknown): DayHours[] {
+  if (!Array.isArray(raw)) return [];
+  const out: DayHours[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const entry = item as Record<string, unknown>;
+    const date = entry.date;
+    if (typeof date !== "string" || !YMD_RE.test(date)) continue;
+
+    const clean: DayHours = { date };
+    if (typeof entry.start === "string" && HHMM_RE.test(entry.start)) clean.start = entry.start;
+    if (typeof entry.end === "string" && HHMM_RE.test(entry.end)) clean.end = entry.end;
+    if (typeof entry.lunch === "boolean") clean.lunch = entry.lunch;
+    if (entry.lunchMinutes != null) clean.lunchMinutes = clampLunchMinutes(entry.lunchMinutes as number);
+
+    const hours = toFiniteNumberOrNull(entry.hours);
+    if (hours != null) clean.hours = hours;
+    const originalHours = toFiniteNumberOrNull(entry.originalHours);
+    if (originalHours != null) clean.originalHours = originalHours;
+
+    out.push(clean);
+  }
+  return out;
+}
+
 const utcDayStart = (d: Date) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
 
 /** Week / bi-week buckets are counted from the job's own start date, not the calendar. */
