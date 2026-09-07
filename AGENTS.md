@@ -170,6 +170,61 @@ stamp agrees with the Toronto date `getTorontoToday()` files it under. Hours are
 computed by the existing `handleTimeInput`, so lunch is deducted the same way it
 is for a manually typed shift.
 
+## Statutory holidays
+
+`src/holidays.ts` holds one province/territory's holiday list as a small set of
+**rules** (`fixed`, `nthWeekday`, `weekdayOnOrBefore`, `easterOffset`,
+`fixedShiftSundayToMonday`), resolved to a concrete date for any year by
+`resolveHolidayDate` — never a hardcoded date table, since a rule like "3rd
+Monday of February" is the same every year but the date it lands on isn't.
+
+**All 13 provinces/territories are sourced**, each with a comment citing the
+governing act and what was confirmed absent (Boxing Day, Easter Monday, the
+National Day for Truth and Reconciliation, and the Family-Day family of
+holidays are each statutory in only some jurisdictions — do not assume one
+province's list generalizes to another). Do not add or edit a jurisdiction's
+list from memory or a web search summary alone; two entries in the research
+behind this file were AI-generated search summaries that hallucinated a
+holiday no primary source supported, and were caught and discarded only by
+checking the actual statute. Cite the jurisdiction's own employment/labour
+standards act or ministry page.
+
+**Holiday pay is one estimate, applied to every province alike.**
+`computeEstimatedHolidayPay` in `calc.ts` implements Ontario's ESA formula
+exactly — public holiday pay is regular wages (inclusive of the 4% vacation
+top-up, excluding any overtime premium) from the 4 work weeks before the work
+week containing the holiday, divided by 20; premium pay is 1.5x for hours
+actually worked that day, sourced and quoted from ontario.ca in the function's
+own comment — but that formula is only verified for Ontario. Every other
+province's real formula differs under its own employment law and hasn't been
+separately sourced, so rather than build 12 more unverified formulas (or
+silently apply Ontario's as if it were exact), the same Ontario-shaped
+estimate is used everywhere and the feature is opt-in, not province-gated, so
+it always reads as an approximation rather than a promise. Not modeled
+anywhere: the ESA's alternative "substitute day off" option (needs an
+employer/employee agreement this app has no way to know about) and the "last
+and first scheduled shift" eligibility test (the app tracks hours worked, not
+shifts scheduled).
+
+Two independent, app-wide settings, both like dark mode (not job-scoped, no
+per-job override):
+- **Province** (`w2b_province`, default `"ON"`) picks which jurisdiction's
+  dates get marked on the calendar. Marking alone never changes a number.
+- **"Add estimated holiday pay to earnings"** (`w2b_includeHolidayPay`,
+  default off) is the only thing that adds money. `computeDetailedDays` only
+  adds it when both a `province` and `includeHolidayPay: true` are passed
+  explicitly, so every existing caller that doesn't pass them gets numbers
+  unchanged from before this existed.
+
+A holiday with zero logged hours still gets a synthesized day when the
+estimate is on (real holiday pay is owed whether or not it was worked), but
+only when the holiday falls **within the span of dates the job already has
+data for** (its earliest to latest logged date) — never before the job's
+first record or after its last, so an ongoing job with nothing logged yet
+this month will not show next month's holiday pay in advance. A zero-total
+estimate (no prior-week history and the holiday wasn't worked) is skipped
+rather than synthesized as a `$0.00` day.
+
 ## Layout and responsiveness
 
 `src/App.css` is **mobile-first**. Base rules target a phone; two `min-width`

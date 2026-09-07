@@ -5,6 +5,7 @@ import customParseFormat from 'dayjs/plugin/customParseFormat';
 import { TimePicker } from "antd";
 import ram from './fun-images/rick-y-morty-rick.png';
 import { getSalesTaxRate } from "./tax";
+import { PROVINCE_LABELS, PROVINCE_ORDER, Province, getHolidayName } from "./holidays";
 import {
   AllJobsExport,
   AllJobsSummary,
@@ -42,11 +43,15 @@ import {
   DARK_MODE_STORAGE_KEY,
   DEFAULT_HOURLY_RATE,
   JOBS_STORAGE_KEY,
+  INCLUDE_HOLIDAY_PAY_STORAGE_KEY,
+  PROVINCE_STORAGE_KEY,
   clearJobStorage,
   cloneDefaultItems,
   createDefaultJobData,
   getInitialActiveJobId,
   getInitialJobs,
+  getInitialIncludeHolidayPay,
+  getInitialProvince,
   isPaymentCycle,
   jobStorageKey,
   loadJobData,
@@ -96,6 +101,10 @@ export default function App(): JSX.Element {
   const [items, setItems] = useState<Item[]>(initialJobData.items);
   const [hourlyRate, setHourlyRate] = useState<number>(initialJobData.hourlyRate);
   const [payCycle, setPayCycle] = useState<PaymentCycle>(initialJobData.payCycle);
+  // Province is app-wide, like dark mode, not scoped to one job.
+  const [province, setProvince] = useState<Province>(getInitialProvince);
+  // Off by default -- see INCLUDE_HOLIDAY_PAY_STORAGE_KEY in storage.ts for why.
+  const [includeHolidayPay, setIncludeHolidayPay] = useState<boolean>(getInitialIncludeHolidayPay);
   const [roster, setRoster] = useState<RosterData>(initialJobData.roster);
   const [dayHours, setDayHours] = useState<DayHours[]>(initialJobData.dayHours);
   const [startDate, setStartDate] = useState<string>(initialJobData.startDate);
@@ -129,6 +138,8 @@ export default function App(): JSX.Element {
   useEffect(() => { safeSetItem(jobStorageKey(activeJobId, "currentDate"), currentDate.toISOString()); }, [currentDate, activeJobId]);
   useEffect(() => { safeSetItem(DARK_MODE_STORAGE_KEY, darkMode ? "1" : "0"); }, [darkMode]);
   useEffect(() => { safeSetItem(COMBINE_JOBS_STORAGE_KEY, combineJobs ? "1" : "0"); }, [combineJobs]);
+  useEffect(() => { safeSetItem(PROVINCE_STORAGE_KEY, province); }, [province]);
+  useEffect(() => { safeSetItem(INCLUDE_HOLIDAY_PAY_STORAGE_KEY, includeHolidayPay ? "1" : "0"); }, [includeHolidayPay]);
 
   useEffect(() => {
     if (darkMode) {
@@ -389,8 +400,8 @@ export default function App(): JSX.Element {
 
   /* ---------------- compute detailed days ---------------- */
   const detailedHistory = useMemo(
-    () => computeDetailedDays({ dayHours, hourlyRate, startDate, useUnlawfulRule, payCycle }),
-    [dayHours, hourlyRate, startDate, useUnlawfulRule, payCycle]
+    () => computeDetailedDays({ dayHours, hourlyRate, startDate, useUnlawfulRule, payCycle, province, includeHolidayPay }),
+    [dayHours, hourlyRate, startDate, useUnlawfulRule, payCycle, province, includeHolidayPay]
   );
 
   /* ---------------- summaries ---------------- */
@@ -400,7 +411,7 @@ export default function App(): JSX.Element {
   // The active job reads from live state; the others from their stored data.
   const allJobsSummary = useMemo<AllJobsSummary>(() => summarizeJobs(jobs.map(job => {
     if (job.id === activeJobId) {
-      return { id: job.id, name: job.name, hourlyRate, startDate, dayHours, payCycle };
+      return { id: job.id, name: job.name, hourlyRate, startDate, dayHours, payCycle, province, includeHolidayPay };
     }
     const stored = loadJobData(job.id);
     return {
@@ -410,8 +421,10 @@ export default function App(): JSX.Element {
       startDate: stored.startDate,
       dayHours: stored.dayHours,
       payCycle: stored.payCycle,
+      province,
+      includeHolidayPay,
     };
-  })), [jobs, activeJobId, hourlyRate, startDate, dayHours, payCycle]);
+  })), [jobs, activeJobId, hourlyRate, startDate, dayHours, payCycle, province, includeHolidayPay]);
 
   const earnedForProgress = combineJobs ? allJobsSummary.totalAfterTax : totalEarnedAfterTax;
   const totalItemPrice = useMemo(() => items.filter(i => i.enabled).reduce((s, i) => s + (i.price || 0), 0), [items]);
@@ -939,6 +952,10 @@ export default function App(): JSX.Element {
       hourlyRate: "Hourly Rate",
       startDate: "Start Date",
       payCycle: "Pay Cycle",
+      province: "Location",
+      holidayNote: "Statutory holiday",
+      holidayPayNote: "Includes estimated holiday pay",
+      includeHolidayPayLabel: "Add estimated holiday pay to earnings",
       roster: "Roster",
       rosterPeriod: "Roster Period",
       rosterWeekly: "Weekly",
@@ -1036,6 +1053,10 @@ export default function App(): JSX.Element {
       hourlyRate: "時薪",
       startDate: "開始日期",
       payCycle: "發薪週期",
+      province: "所在地",
+      holidayNote: "法定假日",
+      holidayPayNote: "包含預估的假日薪資",
+      includeHolidayPayLabel: "將預估假日薪資計入收入",
       roster: "排班",
       rosterPeriod: "排班週期",
       rosterWeekly: "每週",
@@ -1157,6 +1178,17 @@ export default function App(): JSX.Element {
         {rawEntry?.start && rawEntry?.end && shiftCrossesMidnight(rawEntry.start, rawEntry.end) && (
           <p className="day-overnight-note">{labels[lang].overnightNote}</p>
         )}
+
+        {(() => {
+          const holidayName = getHolidayName(dateStr, province);
+          if (!holidayName) return null;
+          return (
+            <p className="day-holiday-note">
+              {holidayName}
+              {includeHolidayPay ? ` — ${labels[lang].holidayPayNote}` : ""}
+            </p>
+          );
+        })()}
 
         <label className="day-field">
           <span className="day-field-label">{labels[lang].hoursWorked}</span>
@@ -1369,6 +1401,24 @@ export default function App(): JSX.Element {
             </select>
           </div>
 
+          <div>
+            <label className="small-label" htmlFor="province-select">{labels[lang].province}</label>
+            <select id="province-select" className="control-input" value={province} onChange={e => setProvince(e.target.value as Province)}>
+              {PROVINCE_ORDER.map(p => (
+                <option key={p} value={p}>{PROVINCE_LABELS[p]}</option>
+              ))}
+            </select>
+          </div>
+
+          <label className="combine-jobs-toggle">
+            <input
+              type="checkbox"
+              checked={includeHolidayPay}
+              onChange={e => setIncludeHolidayPay(e.target.checked)}
+            />
+            <span>{labels[lang].includeHolidayPayLabel}</span>
+          </label>
+
           <div className="button-row">
             <button className="btn" onClick={autoFillWeekdays}>{labels[lang].autoFill}</button>
             <button className="btn warn" onClick={resetMonthHours}>{labels[lang].reset}</button>
@@ -1458,6 +1508,7 @@ export default function App(): JSX.Element {
               const rawEntry = dayHours.find(h => h.date === dateStr);
               const isToday = dateStr === todayStr;
               const isStart = dateStr === startDate;
+              const holidayName = getHolidayName(dateStr, province);
 
               const { biWeekIndex } = getIndexInfo(dateStr);
               const periodIndex = useMonthlyRule
@@ -1478,10 +1529,10 @@ export default function App(): JSX.Element {
                   <button
                     key={idx}
                     type="button"
-                    className={`cal-cell cal-cell-compact ${isToday ? "today" : ""} ${isStart ? "start" : ""} ${hoursText ? "has-hours" : ""}`}
+                    className={`cal-cell cal-cell-compact ${isToday ? "today" : ""} ${isStart ? "start" : ""} ${hoursText ? "has-hours" : ""} ${holidayName ? "holiday" : ""}`}
                     style={{ background: bgColor }}
                     onClick={() => setEditingDate(dateStr)}
-                    aria-label={`${dateStr}${hoursText ? ` ${hoursText}` : ""}`}
+                    aria-label={`${dateStr}${holidayName ? `, ${holidayName}` : ""}${hoursText ? ` ${hoursText}` : ""}`}
                   >
                     <span className="cal-daynum">{dayNum}</span>
                     <span className="cal-hours">{hoursText}</span>
@@ -1491,11 +1542,12 @@ export default function App(): JSX.Element {
               }
 
               return (
-                <div key={idx} className={`cal-cell ${isToday ? "today" : ""} ${isStart ? "start" : ""}`} style={{
+                <div key={idx} className={`cal-cell ${isToday ? "today" : ""} ${isStart ? "start" : ""} ${holidayName ? "holiday" : ""}`} style={{
                   background: bgColor,
                   border: isToday ? "2px solid #1976d2" : undefined,
                 }}>
                   <div className="cal-daynum">{dayNum}</div>
+                  {holidayName && <div className="cal-holiday-badge" title={holidayName}>{holidayName}</div>}
                   {renderDayControls(dateStr)}
                   <div className="cal-hours">{hoursText}</div>
                   <div className="cal-earn">{earnText}</div>

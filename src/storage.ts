@@ -9,6 +9,7 @@ import {
   sanitizeDayHours,
   ymd,
 } from "./calc";
+import { DEFAULT_PROVINCE, Province, PROVINCE_ORDER } from "./holidays";
 
 export const DEFAULT_JOB_ID = "default";
 export const DEFAULT_JOB_NAME = "Main Job";
@@ -18,6 +19,32 @@ export const JOBS_STORAGE_KEY = "w2b_jobs";
 export const ACTIVE_JOB_STORAGE_KEY = "w2b_activeJob";
 export const DARK_MODE_STORAGE_KEY = "w2b_dark";
 export const COMBINE_JOBS_STORAGE_KEY = "w2b_combineJobs";
+/**
+ * One province for the whole app, like dark mode -- not job-scoped. Someone
+ * working two jobs in two different provinces is a real case this doesn't
+ * handle, but it's the same simplifying choice already made for dark mode
+ * and the combine-jobs toggle, and a much smaller app to start from than
+ * per-job provinces would be.
+ */
+export const PROVINCE_STORAGE_KEY = "w2b_province";
+/**
+ * Off by default: the estimate behind it (see computeEstimatedHolidayPay in
+ * calc.ts) is Ontario's verified ESA formula applied everywhere as an
+ * approximation, so showing it takes an explicit opt-in rather than
+ * appearing automatically the moment a province is picked.
+ */
+export const INCLUDE_HOLIDAY_PAY_STORAGE_KEY = "w2b_includeHolidayPay";
+
+export const isProvince = (value: unknown): value is Province =>
+  typeof value === "string" && (PROVINCE_ORDER as string[]).includes(value);
+
+export const getInitialProvince = (): Province => {
+  const stored = localStorage.getItem(PROVINCE_STORAGE_KEY);
+  return isProvince(stored) ? stored : DEFAULT_PROVINCE;
+};
+
+export const getInitialIncludeHolidayPay = (): boolean =>
+  localStorage.getItem(INCLUDE_HOLIDAY_PAY_STORAGE_KEY) === "1";
 
 export const LEGACY_STORAGE_KEYS = {
   items: "w2b_items",

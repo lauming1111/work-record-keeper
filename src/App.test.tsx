@@ -2,6 +2,7 @@ import React from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import App from "./App";
 import { jobStorageKey } from "./storage";
+import { DayHours } from "./calc";
 
 type MockFile = File & { __dataUrl?: string; __text?: string };
 
@@ -887,4 +888,182 @@ test("data corrupted in storage by an earlier bug does not crash the app on load
 
   expect(screen.getByText("Work Record Keeper")).toBeInTheDocument();
   expect(screen.getAllByText("$161.80").length).toBeGreaterThan(0);
+});
+
+/* ---------------- statutory holidays and Ontario premium pay ---------------- */
+
+test("defaults to Ontario with the holiday-pay estimate off, and the picker offers every province", () => {
+  render(<App />);
+  const select = screen.getByLabelText(/Location/i) as HTMLSelectElement;
+  expect(select.value).toBe("ON");
+  expect(screen.getByRole("option", { name: "Ontario (Toronto)" })).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: "British Columbia" })).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: "Nunavut" })).toBeInTheDocument();
+  // the estimate is the same formula for every province (see calc.ts), so the
+  // picker no longer singles any of them out -- only the separate checkbox,
+  // off by default, controls whether it is added at all
+  expect((screen.getByLabelText(/Add estimated holiday pay/i) as HTMLInputElement).checked).toBe(false);
+});
+
+test("a statutory holiday is marked on the calendar", () => {
+  localStorage.setItem("w2b_jobs", JSON.stringify([{ id: "cafe", name: "Cafe" }]));
+  localStorage.setItem("w2b_activeJob", "cafe");
+  localStorage.setItem(jobStorageKey("cafe", "hourlyRate"), "20");
+  localStorage.setItem(jobStorageKey("cafe", "startDate"), "2026-01-01");
+  localStorage.setItem(jobStorageKey("cafe", "currentDate"), new Date("2026-07-15T00:00:00Z").toISOString());
+  render(<App />);
+
+  // Canada Day, 2026-07-01, is a statutory holiday everywhere, including the
+  // Ontario default -- shown both as a calendar badge and, in this desktop
+  // layout, in every cell's inline day editor too
+  expect(screen.getAllByText("Canada Day").length).toBeGreaterThan(0);
+});
+
+test("switching the province changes which days are marked", () => {
+  localStorage.setItem("w2b_jobs", JSON.stringify([{ id: "cafe", name: "Cafe" }]));
+  localStorage.setItem("w2b_activeJob", "cafe");
+  localStorage.setItem(jobStorageKey("cafe", "hourlyRate"), "20");
+  localStorage.setItem(jobStorageKey("cafe", "startDate"), "2026-01-01");
+  localStorage.setItem(jobStorageKey("cafe", "currentDate"), new Date("2026-09-15T00:00:00Z").toISOString());
+  render(<App />);
+
+  // Ontario has no statutory day on September 30
+  expect(screen.queryAllByText("National Day for Truth and Reconciliation")).toHaveLength(0);
+
+  fireEvent.change(screen.getByLabelText(/Location/i), { target: { value: "BC" } });
+
+  // British Columbia does -- the badge on the calendar and the note in the
+  // (desktop, inline) day editor both name it
+  expect(screen.getAllByText("National Day for Truth and Reconciliation").length).toBeGreaterThan(0);
+});
+
+test("the holiday is always named; the pay note only appears once the estimate is switched on", () => {
+  const restore = setNarrowViewport(true);
+  try {
+    localStorage.setItem("w2b_jobs", JSON.stringify([{ id: "cafe", name: "Cafe" }]));
+    localStorage.setItem("w2b_activeJob", "cafe");
+    localStorage.setItem(jobStorageKey("cafe", "hourlyRate"), "20");
+    localStorage.setItem(jobStorageKey("cafe", "startDate"), "2026-01-01");
+    localStorage.setItem(jobStorageKey("cafe", "currentDate"), new Date("2026-07-15T00:00:00Z").toISOString());
+    render(<App />);
+
+    fireEvent.click(document.querySelector('.cal-cell-compact[aria-label^="2026-07-01"]')!);
+    expect(screen.getByText(/Canada Day/)).toBeInTheDocument();
+    expect(screen.queryByText(/Includes estimated holiday pay/)).not.toBeInTheDocument();
+
+    fireEvent.click(document.querySelector(".day-sheet-head .btn")!); // Done, close the sheet
+    fireEvent.click(screen.getByLabelText(/Add estimated holiday pay/i));
+    fireEvent.click(document.querySelector('.cal-cell-compact[aria-label^="2026-07-01"]')!);
+
+    expect(screen.getByText(/Includes estimated holiday pay/)).toBeInTheDocument();
+  } finally {
+    restore();
+  }
+});
+
+test("an Ontario statutory holiday adds real pay, once the estimate is switched on, even with no logged hours", () => {
+  const restore = setNarrowViewport(true);
+  try {
+  localStorage.setItem("w2b_jobs", JSON.stringify([{ id: "cafe", name: "Cafe" }]));
+  localStorage.setItem("w2b_activeJob", "cafe");
+  localStorage.setItem(jobStorageKey("cafe", "hourlyRate"), "20");
+  localStorage.setItem(jobStorageKey("cafe", "startDate"), "2026-08-03");
+  localStorage.setItem(jobStorageKey("cafe", "currentDate"), new Date("2026-09-15T00:00:00Z").toISOString());
+  // 4 full weeks of 8h weekdays, then one more week after Labour Day so the
+  // holiday (2026-09-07) falls inside the job's logged span
+  const days: DayHours[] = [];
+  for (let week = 1; week <= 5; week++) {
+    for (let weekday = 0; weekday <= 4; weekday++) {
+      if (week === 5 && weekday === 0) continue; // the holiday itself: not worked
+      const d = new Date(2026, 7, 3 + week * 7 + weekday);
+      days.push({ date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`, hours: 8 });
+    }
+  }
+  localStorage.setItem(jobStorageKey("cafe", "dayHours"), JSON.stringify(days));
+  render(<App />);
+  fireEvent.click(screen.getByLabelText(/Add estimated holiday pay/i));
+
+  // The exact dollar figure (and that it equals regularEarnings/20) is
+  // calc.test.ts's job, tested in isolation; this only confirms the feature
+  // reaches the UI: a day nobody logged now exists, with zero hours and a
+  // nonzero paycheque, because it's a statutory holiday.
+  const labourDay = document.querySelector('.cal-cell-compact[aria-label^="2026-09-07"]');
+  expect(labourDay).not.toBeNull();
+  expect(labourDay!.textContent).toMatch(/\$\d/);
+  expect(labourDay!.textContent).not.toMatch(/\d+\.\d\dh/); // no hours were logged
+  } finally {
+    restore();
+  }
+});
+
+test("every province gets the same estimated holiday pay once the checkbox is on, not just Ontario", () => {
+  const restore = setNarrowViewport(true);
+  try {
+    localStorage.setItem("w2b_jobs", JSON.stringify([{ id: "cafe", name: "Cafe" }]));
+    localStorage.setItem("w2b_activeJob", "cafe");
+    localStorage.setItem(jobStorageKey("cafe", "hourlyRate"), "20");
+    localStorage.setItem(jobStorageKey("cafe", "startDate"), "2026-01-01");
+    localStorage.setItem(jobStorageKey("cafe", "currentDate"), new Date("2026-07-15T00:00:00Z").toISOString());
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText(/Location/i), { target: { value: "BC" } });
+    fireEvent.click(screen.getByLabelText(/Add estimated holiday pay/i));
+    fireEvent.click(document.querySelector('.cal-cell-compact[aria-label^="2026-07-01"]')!);
+
+    // BC has no logged hours in this fixture either, so the same $0 premium /
+    // averaged-pay-only shape applies as it does for Ontario in the test above
+    expect(screen.getByText(/Canada Day/)).toBeInTheDocument();
+    expect(screen.getByText(/Includes estimated holiday pay/)).toBeInTheDocument();
+  } finally {
+    restore();
+  }
+});
+
+test("the estimated-holiday-pay choice persists like the other settings", () => {
+  const { unmount } = render(<App />);
+  fireEvent.click(screen.getByLabelText(/Add estimated holiday pay/i));
+  expect(localStorage.getItem("w2b_includeHolidayPay")).toBe("1");
+  unmount();
+
+  render(<App />);
+  expect((screen.getByLabelText(/Add estimated holiday pay/i) as HTMLInputElement).checked).toBe(true);
+});
+
+test("turning the estimate back off removes the added pay", () => {
+  const restore = setNarrowViewport(true);
+  try {
+    localStorage.setItem("w2b_jobs", JSON.stringify([{ id: "cafe", name: "Cafe" }]));
+    localStorage.setItem("w2b_activeJob", "cafe");
+    localStorage.setItem(jobStorageKey("cafe", "hourlyRate"), "20");
+    // Labour Day 2026-09-07 is week index 5 counting from this Monday start
+    // date, so "the 4 work weeks before" (weeks 1-4) is 2026-08-10 through
+    // 2026-09-04 -- the same fixture calc.test.ts's own integration tests use,
+    // so the numerator here is known to be nonzero.
+    localStorage.setItem(jobStorageKey("cafe", "startDate"), "2026-08-03");
+    localStorage.setItem(jobStorageKey("cafe", "currentDate"), new Date("2026-09-15T00:00:00Z").toISOString());
+    const days: DayHours[] = [];
+    for (let week = 1; week <= 4; week++) {
+      for (let weekday = 0; weekday <= 4; weekday++) {
+        const d = new Date(2026, 7, 3 + week * 7 + weekday);
+        days.push({ date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`, hours: 8 });
+      }
+    }
+    // Plus a day on/after the holiday, so it falls inside the job's logged
+    // span rather than after the end of it (see calc.test.ts's "outside the
+    // span" case -- the same thing tripped up that test's fixture too).
+    days.push({ date: "2026-09-08", hours: 8 });
+    localStorage.setItem(jobStorageKey("cafe", "dayHours"), JSON.stringify(days));
+    render(<App />);
+    const checkbox = screen.getByLabelText(/Add estimated holiday pay/i);
+
+    fireEvent.click(checkbox); // on
+    const withEstimate = document.querySelector('.cal-cell-compact[aria-label^="2026-09-07"]')!.textContent;
+    fireEvent.click(checkbox); // back off
+    const withoutEstimate = document.querySelector('.cal-cell-compact[aria-label^="2026-09-07"]')!.textContent;
+
+    expect(withEstimate).toMatch(/\$\d/);
+    expect(withoutEstimate).not.toMatch(/\$\d/); // no hours logged and no estimate: nothing to show
+  } finally {
+    restore();
+  }
 });

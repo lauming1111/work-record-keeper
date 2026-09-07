@@ -3,6 +3,7 @@ import {
   PaymentCycle,
   clampLunchMinutes,
   computeDetailedDays,
+  computeEstimatedHolidayPay,
   computeJobEarnings,
   computeShiftHours,
   getIndexInfo,
@@ -421,5 +422,122 @@ describe('sanitizeDayHours', () => {
       hourlyRate: 20,
       startDate: '2026-01-05',
     })).not.toThrow();
+  });
+});
+
+describe('computeEstimatedHolidayPay', () => {
+  test('public holiday pay is regular earnings from the prior 4 weeks, divided by 20', () => {
+    expect(computeEstimatedHolidayPay(3328, 0, 20)).toEqual({ publicHolidayPay: 166.4, premiumPay: 0, total: 166.4 });
+  });
+
+  test('premium pay is 1.5x the hourly rate for hours worked on the holiday itself', () => {
+    expect(computeEstimatedHolidayPay(0, 8, 20)).toEqual({ publicHolidayPay: 0, premiumPay: 240, total: 240 });
+  });
+
+  test('both apply together when the holiday is worked and there is prior-week history', () => {
+    expect(computeEstimatedHolidayPay(3328, 8, 20)).toEqual({ publicHolidayPay: 166.4, premiumPay: 240, total: 406.4 });
+  });
+
+  test('a brand new job with no prior weeks owes only premium pay', () => {
+    expect(computeEstimatedHolidayPay(0, 0, 20)).toEqual({ publicHolidayPay: 0, premiumPay: 0, total: 0 });
+  });
+});
+
+describe('computeDetailedDays -- estimated holiday pay integration', () => {
+  // Labour Day 2026 is Monday September 7, week index 5 counting from
+  // 2026-08-03 (a Monday). "The 4 work weeks before the work week containing
+  // the holiday" is weeks 1-4: 2026-08-10 through 2026-09-04. Labour Day is a
+  // statutory holiday in every province sourced, so it exercises the estimate
+  // regardless of which one a test picks.
+  const HOLIDAY_START = '2026-08-03';
+  const HOLIDAY = '2026-09-07';
+  const priorFourWeeksOfRegularWork = (): DayHours[] => {
+    const days: DayHours[] = [];
+    for (const week of [1, 2, 3, 4]) {
+      for (const weekday of [0, 1, 2, 3, 4]) {
+        const d = new Date(2026, 7, 3 + week * 7 + weekday);
+        days.push({ date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`, hours: 8 });
+      }
+    }
+    return days;
+  };
+
+  test('a holiday worked adds public holiday pay and premium pay to that day alone', () => {
+    const dayHours = [...priorFourWeeksOfRegularWork(), { date: HOLIDAY, hours: 8 }];
+    const days = computeDetailedDays({ dayHours, hourlyRate: 20, startDate: HOLIDAY_START, province: 'ON', includeHolidayPay: true });
+    const labourDay = days.find(d => d.date === HOLIDAY)!;
+    const ordinaryDay = days.find(d => d.date === '2026-08-10')!;
+
+    // 4 prior weeks of 5x8h @ $20 with the 4% vacation top-up: 4 * 5 * 8 * 20 * 1.04 = 3328
+    const { total } = computeEstimatedHolidayPay(3328, 8, 20);
+    expect(labourDay.earnings).toBeCloseTo(166.4 + total, 2); // the day's own regular pay, plus holiday pay
+    expect(ordinaryDay.earnings).toBeCloseTo(166.4, 2); // untouched
+  });
+
+  test('a holiday not worked still gets paid, as a new day that did not exist before', () => {
+    // The holiday itself has no entry, but a day the week after does, so the
+    // holiday falls inside the job's logged span rather than after the end
+    // of it -- see the "outside the span" test below for the other case.
+    const dayHours = [...priorFourWeeksOfRegularWork(), { date: '2026-09-08', hours: 8 }];
+    const days = computeDetailedDays({ dayHours, hourlyRate: 20, startDate: HOLIDAY_START, province: 'ON', includeHolidayPay: true });
+
+    const labourDay = days.find(d => d.date === HOLIDAY);
+    expect(labourDay).toBeDefined();
+    expect(labourDay!.hours).toBe(0);
+    expect(labourDay!.earnings).toBeCloseTo(166.4, 2); // public holiday pay only, no premium
+    expect(labourDay!.afterTax).toBeGreaterThan(0); // it is still taxed like any other income
+  });
+
+  test('holiday pay is opt-in: leaving includeHolidayPay unset leaves every number exactly as before', () => {
+    const dayHours = [...priorFourWeeksOfRegularWork(), { date: HOLIDAY, hours: 8 }];
+    const withToggleOn = computeDetailedDays({ dayHours, hourlyRate: 20, startDate: HOLIDAY_START, province: 'ON', includeHolidayPay: true });
+    const withToggleUnset = computeDetailedDays({ dayHours, hourlyRate: 20, startDate: HOLIDAY_START, province: 'ON' });
+
+    expect(withToggleUnset.find(d => d.date === HOLIDAY)!.earnings).toBeCloseTo(166.4, 2);
+    expect(withToggleOn.find(d => d.date === HOLIDAY)!.earnings).toBeGreaterThan(
+      withToggleUnset.find(d => d.date === HOLIDAY)!.earnings
+    );
+  });
+
+  test('a province is not enough on its own -- includeHolidayPay must also be true', () => {
+    const dayHours = [...priorFourWeeksOfRegularWork(), { date: HOLIDAY, hours: 8 }];
+    const days = computeDetailedDays({ dayHours, hourlyRate: 20, startDate: HOLIDAY_START, province: 'ON', includeHolidayPay: false });
+    expect(days.find(d => d.date === HOLIDAY)!.earnings).toBeCloseTo(166.4, 2);
+  });
+
+  test('every province gets the same estimate when the toggle is on, not just Ontario', () => {
+    const dayHours = [...priorFourWeeksOfRegularWork(), { date: HOLIDAY, hours: 8 }];
+    const ontario = computeDetailedDays({ dayHours, hourlyRate: 20, startDate: HOLIDAY_START, province: 'ON', includeHolidayPay: true });
+    const britishColumbia = computeDetailedDays({ dayHours, hourlyRate: 20, startDate: HOLIDAY_START, province: 'BC', includeHolidayPay: true });
+    // same formula everywhere -- see computeEstimatedHolidayPay's own comment
+    // for why this is an estimate outside Ontario, not a verified number
+    expect(britishColumbia.find(d => d.date === HOLIDAY)!.earnings).toBeCloseTo(
+      ontario.find(d => d.date === HOLIDAY)!.earnings, 2
+    );
+  });
+
+  test('the "3495" unlawful rule never gets holiday pay, even with the toggle on', () => {
+    const dayHours = [...priorFourWeeksOfRegularWork(), { date: HOLIDAY, hours: 8 }];
+    const days = computeDetailedDays({
+      dayHours, hourlyRate: 20, startDate: HOLIDAY_START, province: 'ON', includeHolidayPay: true, useUnlawfulRule: true,
+    });
+    // no synthesized day, and the worked holiday earns exactly its own hours
+    expect(days.find(d => d.date === HOLIDAY)!.earnings).toBeCloseTo(166.4, 2);
+  });
+
+  test('a holiday outside the span of logged dates is not synthesized', () => {
+    // this job only ever has August data; Labour Day (September) is outside it
+    const augustOnly = priorFourWeeksOfRegularWork();
+    const days = computeDetailedDays({ dayHours: augustOnly, hourlyRate: 20, startDate: HOLIDAY_START, province: 'ON', includeHolidayPay: true });
+    expect(days.find(d => d.date === HOLIDAY)).toBeUndefined();
+    expect(days.length).toBe(augustOnly.length);
+  });
+
+  test('every day still balances after holiday pay is added', () => {
+    const dayHours = [...priorFourWeeksOfRegularWork(), { date: HOLIDAY, hours: 8 }];
+    const days = computeDetailedDays({ dayHours, hourlyRate: 20, startDate: HOLIDAY_START, province: 'ON', includeHolidayPay: true });
+    days.forEach(d => {
+      expect(d.afterTax).toBeCloseTo(d.earnings - d.incomeTax - d.employeeInsurance - d.cpp, 2);
+    });
   });
 });
