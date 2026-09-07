@@ -1,14 +1,14 @@
 {
   "files": {
-    "main.css": "/work-record-keeper/static/css/main.3d6e596a.css",
-    "main.js": "/work-record-keeper/static/js/main.8c9fe3ca.js",
+    "main.css": "/work-record-keeper/static/css/main.00cec5cd.css",
+    "main.js": "/work-record-keeper/static/js/main.4485b20e.js",
     "static/media/rick-y-morty-rick.png": "/work-record-keeper/static/media/rick-y-morty-rick.a6e981671f7d6b475ec1.png",
     "index.html": "/work-record-keeper/index.html",
-    "main.3d6e596a.css.map": "/work-record-keeper/static/css/main.3d6e596a.css.map",
-    "main.8c9fe3ca.js.map": "/work-record-keeper/static/js/main.8c9fe3ca.js.map"
+    "main.00cec5cd.css.map": "/work-record-keeper/static/css/main.00cec5cd.css.map",
+    "main.4485b20e.js.map": "/work-record-keeper/static/js/main.4485b20e.js.map"
   },
   "entrypoints": [
-    "static/css/main.3d6e596a.css",
-    "static/js/main.8c9fe3ca.js"
+    "static/css/main.00cec5cd.css",
+    "static/js/main.4485b20e.js"
   ]
 }
