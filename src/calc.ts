@@ -6,6 +6,7 @@ import {
   computeIncomeTax,
   getTaxYearRates,
 } from "./tax";
+import { Province, getHolidaysForYear } from "./holidays";
 
 /* ---------------------- Types ---------------------- */
 export type Item = {
@@ -84,6 +85,8 @@ export type JobCalcInput = {
   startDate: string;
   dayHours: DayHours[];
   payCycle?: PaymentCycle;
+  province?: Province;
+  includeHolidayPay?: boolean;
 };
 
 /** One job's computed earnings, priced with that job's own hourly rate. */
@@ -304,7 +307,7 @@ export const getPeriodKey = (dateStr: string, payCycle: PaymentCycle, baseStart:
 
 /* ------------- Per-day earnings ------------- */
 
-type DayGross = { date: string; hours: number; earnings: number; taxable: number };
+type DayGross = { date: string; hours: number; earnings: number; taxable: number; regularEarnings: number };
 
 /**
  * Gross pay and the taxable share of it, per day. Both payroll rules live here;
@@ -328,7 +331,7 @@ function computeDayGross(
   for (const r of sorted) {
     const h = r.hours || 0;
     if (h <= 0) {
-      rows.push({ date: r.date, hours: 0, earnings: 0, taxable: 0 });
+      rows.push({ date: r.date, hours: 0, earnings: 0, taxable: 0, regularEarnings: 0 });
       continue;
     }
 
@@ -339,6 +342,7 @@ function computeDayGross(
 
     let earnings = 0;
     let taxable = 0;
+    let regularEarnings = 0;
 
     if (useUnlawfulRule) {
       // Hours past the bi-weekly threshold are paid untaxed, spread pro-rata
@@ -354,22 +358,130 @@ function computeDayGross(
       earnings = h * hourlyRate * bonusMultiplier;
       const taxableHours = Math.max(0, h - dayTaxFree);
       taxable = taxableHours * hourlyRate * bonusMultiplier;
+      // Ontario holiday pay isn't modeled for this rule (see PROVINCES_WITH_PREMIUM_PAY),
+      // so this value is never read; kept populated for a consistent type.
+      regularEarnings = earnings;
     } else {
       const workedSoFar = weeklyWorked.get(weekIndex) || 0;
       const regularHours = Math.max(0, Math.min(h, WEEKLY_OVERTIME_THRESHOLD - workedSoFar));
       const overtimeHours = Math.max(0, h - regularHours);
       weeklyWorked.set(weekIndex, workedSoFar + h);
 
-      const regularEarnings = regularHours * hourlyRate * bonusMultiplier;
+      regularEarnings = regularHours * hourlyRate * bonusMultiplier;
       const overtimeEarnings = overtimeHours * hourlyRate * OVERTIME_MULTIPLIER * bonusMultiplier;
       earnings = regularEarnings + overtimeEarnings;
       taxable = earnings;
     }
 
-    rows.push({ date: r.date, hours: h, earnings, taxable });
+    rows.push({ date: r.date, hours: h, earnings, taxable, regularEarnings });
   }
 
   return rows;
+}
+
+export type EstimatedHolidayPay = { publicHolidayPay: number; premiumPay: number; total: number };
+
+/**
+ * Estimated statutory holiday pay, for one holiday in any province.
+ *
+ * The formula is Ontario's ESA one -- the only jurisdiction this has been
+ * verified against an official source for -- used here as a general
+ * approximation everywhere, since every other province's actual formula
+ * differs and hasn't been separately sourced and verified the same way.
+ * Turning this on is an explicit choice (INCLUDE_HOLIDAY_PAY_STORAGE_KEY in
+ * storage.ts) specifically so it reads as an estimate, not a promise that a
+ * BC or Alberta number matches that province's own law.
+ *
+ * Public holiday pay = (regular wages earned, plus vacation pay payable on
+ * them, in the 4 work weeks before the work week containing the holiday) /
+ * 20. This app already bakes vacation pay into regular-rate earnings via
+ * BIWEEKLY_BONUS_RATE, so `regularEarningsInPriorFourWeeks` -- the sum of the
+ * `regularEarnings` this module already computes per day, over that window --
+ * is exactly Ontario's numerator, with the overtime premium already excluded
+ * because it was never part of `regularEarnings` to begin with.
+ *
+ * If the employee also works the holiday, they additionally get premium pay:
+ * 1.5x their hourly rate for the hours actually worked that day. This models
+ * only Ontario's "public holiday pay + premium pay, no substitute day"
+ * option; the alternative "substitute day off" option needs an
+ * employer/employee agreement this app has no way to know about, so it is
+ * not modeled, in Ontario or anywhere else.
+ *
+ * https://www.ontario.ca/document/your-guide-employment-standards-act-0/public-holidays
+ */
+export function computeEstimatedHolidayPay(
+  regularEarningsInPriorFourWeeks: number,
+  hoursWorkedOnHoliday: number,
+  hourlyRate: number
+): EstimatedHolidayPay {
+  const publicHolidayPay = round2(regularEarningsInPriorFourWeeks / 20);
+  const premiumPay = round2(Math.max(0, hoursWorkedOnHoliday) * hourlyRate * OVERTIME_MULTIPLIER);
+  return { publicHolidayPay, premiumPay, total: round2(publicHolidayPay + premiumPay) };
+}
+
+/**
+ * Add estimated holiday pay to `rows` for every statutory holiday within the
+ * span the job already has data for (its earliest to latest logged date,
+ * inclusive). Real holiday pay is owed whether or not the day was worked, so
+ * a holiday with no logged hours gets a new zero-hour row rather than being
+ * skipped -- but only inside that span, never before the job's first record
+ * or after its last, so this cannot invent a paid day the user has no data
+ * anywhere near.
+ *
+ * A no-op unless the caller opts in (`includeHolidayPay`) and for the "3495"
+ * unlawful rule, which has no statutory framework to apply this to in the
+ * first place.
+ */
+function applyEstimatedHolidayPay(
+  rows: DayGross[],
+  hourlyRate: number,
+  startDate: string,
+  province: Province | undefined,
+  includeHolidayPay: boolean | undefined,
+  useUnlawfulRule: boolean
+): DayGross[] {
+  if (useUnlawfulRule || !province || !includeHolidayPay || rows.length === 0) {
+    return rows;
+  }
+
+  const byDate = new Map(rows.map(r => [r.date, r]));
+  const firstDate = rows[0].date;
+  const lastDate = rows[rows.length - 1].date;
+  const firstYear = Number(firstDate.slice(0, 4));
+  const lastYear = Number(lastDate.slice(0, 4));
+
+  const weekIndexOf = (dateStr: string) => getIndexInfo(dateStr, startDate).weekIndex;
+
+  for (let year = firstYear; year <= lastYear; year++) {
+    for (const holiday of getHolidaysForYear(province, year)) {
+      if (holiday.date < firstDate || holiday.date > lastDate) continue;
+
+      const holidayWeek = weekIndexOf(holiday.date);
+      let regularEarningsInPriorFourWeeks = 0;
+      for (const row of rows) {
+        const week = weekIndexOf(row.date);
+        if (week >= holidayWeek - 4 && week < holidayWeek) {
+          regularEarningsInPriorFourWeeks += row.regularEarnings;
+        }
+      }
+
+      const existing = byDate.get(holiday.date);
+      const hoursWorkedOnHoliday = existing?.hours ?? 0;
+      const { total } = computeEstimatedHolidayPay(regularEarningsInPriorFourWeeks, hoursWorkedOnHoliday, hourlyRate);
+      if (total <= 0) continue;
+
+      if (existing) {
+        existing.earnings = round2(existing.earnings + total);
+        existing.taxable = round2(existing.taxable + total);
+      } else {
+        const synthesized: DayGross = { date: holiday.date, hours: 0, earnings: total, taxable: total, regularEarnings: 0 };
+        rows.push(synthesized);
+        byDate.set(holiday.date, synthesized);
+      }
+    }
+  }
+
+  return rows.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /**
@@ -414,18 +526,35 @@ export function computeDetailedDays({
   startDate,
   useUnlawfulRule = false,
   payCycle = DEFAULT_CALC_PAY_CYCLE,
+  province,
+  includeHolidayPay = false,
 }: {
   dayHours: DayHours[];
   hourlyRate: number;
   startDate: string;
   useUnlawfulRule?: boolean;
   payCycle?: PaymentCycle;
+  /** Which jurisdiction's dates to mark as holidays. Marking alone never
+   *  changes a number -- only `includeHolidayPay` does that. */
+  province?: Province;
+  /** Opt-in only: an explicit choice, off by default, since the estimate
+   *  behind it is Ontario's verified formula applied everywhere as an
+   *  approximation (see computeEstimatedHolidayPay). Omitting this leaves
+   *  every existing caller's numbers exactly as they were. */
+  includeHolidayPay?: boolean;
 }): DetailedDay[] {
   const entries = dayHours.filter(d => d.hours != null && !isNaN(d.hours!)) as { date: string; hours: number; }[];
   if (entries.length === 0) return [];
 
   const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date));
-  const rows = computeDayGross(sorted, hourlyRate, startDate, useUnlawfulRule);
+  const rows = applyEstimatedHolidayPay(
+    computeDayGross(sorted, hourlyRate, startDate, useUnlawfulRule),
+    hourlyRate,
+    startDate,
+    province,
+    includeHolidayPay,
+    useUnlawfulRule
+  );
 
   // Bucket days into pay periods, keeping first-seen order (already chronological).
   const periods = new Map<string, { rows: DayGross[]; end: Date }>();
@@ -503,6 +632,8 @@ export function computeJobEarnings(job: JobCalcInput): JobEarnings {
     startDate: job.startDate,
     useUnlawfulRule: isUnlawfulRuleJob(job.name),
     payCycle: job.payCycle ?? DEFAULT_CALC_PAY_CYCLE,
+    province: job.province,
+    includeHolidayPay: job.includeHolidayPay,
   });
 
   return {

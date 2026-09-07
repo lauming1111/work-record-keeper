@@ -614,10 +614,14 @@ header {
 .cal-cell.empty { background: transparent; border-style: dashed; }
 .cal-cell.today { outline: 2px solid rgba(40, 200, 118, 0.55); outline-offset: -2px; }
 .cal-cell.start { outline: 2px solid rgba(255, 200, 87, 0.65); outline-offset: -2px; }
+/* A top stripe rather than another outline, so a day that is also today or
+   the start date can show both without the two competing for the same edge. */
+.cal-cell.holiday { border-top: 3px solid var(--danger); }
 
 .cal-daynum { font-weight: 700; font-size: var(--fs-xs); line-height: 1.2; }
 .cal-hours,
-.cal-earn {
+.cal-earn,
+.cal-holiday-badge {
   font-size: 9px;
   line-height: 1.2;
   color: var(--muted);
@@ -627,6 +631,7 @@ header {
   white-space: nowrap;
 }
 .cal-hours { color: inherit; font-weight: 600; font-size: 10px; }
+.cal-holiday-badge { color: var(--danger); font-weight: 600; }
 
 /* the tappable phone cell */
 .cal-cell-compact {
@@ -668,6 +673,12 @@ header {
   margin: 0;
   font-size: var(--fs-xs);
   color: var(--amber);
+}
+.day-holiday-note {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--danger);
+  font-weight: 600;
 }
 .day-reset { width: 100%; }
 
